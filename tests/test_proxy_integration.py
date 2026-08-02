@@ -781,7 +781,18 @@ async def test_reasoning_effort_passed_to_upstream(tmp_path) -> None:
     def handler(request: httpx.Request) -> httpx.Response:
         body = json.loads(request.content)
         captured["reasoning_effort"] = body.get("reasoning_effort")
-        return httpx.Response(200, json={"id": "c", "object": "chat.completion", "created": 1, "model": "m", "choices": [{"index": 0, "message": {"role": "assistant", "content": "ok"}, "finish_reason": "stop"}]})
+        return httpx.Response(
+            200,
+            json={
+                "id": "c",
+                "object": "chat.completion",
+                "created": 1,
+                "model": "m",
+                "choices": [
+                    {"index": 0, "message": {"role": "assistant", "content": "ok"}, "finish_reason": "stop"}
+                ],
+            },
+        )
 
     upstream.responder = handler
     app, _ = make_app(tmp_path, upstream, VisionMock())

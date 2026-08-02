@@ -56,6 +56,26 @@ def _safe_json(text: str) -> Any:
         return {"_raw": text}
 
 
+def _anthropic_tool_choice_to_chat(tool_choice: Any) -> Any:
+    if isinstance(tool_choice, str):
+        return tool_choice
+    if isinstance(tool_choice, dict):
+        t = tool_choice.get("type")
+        if t == "any":
+            return "required"
+        if t == "tool":
+            return {"type": "function", "function": {"name": tool_choice.get("name", "")}}
+    return "auto"
+
+
+def _responses_tool_choice_to_chat(tool_choice: Any) -> Any:
+    if isinstance(tool_choice, str):
+        return tool_choice
+    if isinstance(tool_choice, dict) and tool_choice.get("type") == "function":
+        return {"type": "function", "function": {"name": tool_choice.get("name", "")}}
+    return "auto"
+
+
 # ---------------------------------------------------------------------------
 # Parsing: client protocol -> chat messages/tools/base_body
 # ---------------------------------------------------------------------------
@@ -264,6 +284,10 @@ def _parse_anthropic(body: dict[str, Any]) -> NormalizedRequest:
     thinking = body.get("thinking")
     if isinstance(thinking, dict):
         base_body["thinking"] = deepcopy(thinking)
+    if body.get("tool_choice") is not None:
+        base_body["tool_choice"] = _anthropic_tool_choice_to_chat(body["tool_choice"])
+    if body.get("metadata") is not None:
+        base_body["metadata"] = deepcopy(body["metadata"])
 
     return NormalizedRequest(
         protocol=PROTOCOL_ANTHROPIC,
@@ -435,6 +459,21 @@ def _parse_responses(body: dict[str, Any]) -> NormalizedRequest:
             base_body["reasoning_effort"] = effort
     elif isinstance(body.get("reasoning_effort"), str) and body["reasoning_effort"]:
         base_body["reasoning_effort"] = body["reasoning_effort"]
+    if body.get("tool_choice") is not None:
+        base_body["tool_choice"] = _responses_tool_choice_to_chat(body["tool_choice"])
+    for key in ("parallel_tool_calls", "store", "user", "metadata", "truncation"):
+        if body.get(key) is not None:
+            base_body[key] = deepcopy(body[key])
+    text = body.get("text")
+    if isinstance(text, dict) and isinstance(text.get("format"), str):
+        fmt = text["format"]
+        if fmt == "json_schema":
+            base_body["response_format"] = {
+                "type": "json_schema",
+                "json_schema": deepcopy(text.get("schema") or {}),
+            }
+        elif fmt == "plain_text":
+            base_body["response_format"] = {"type": "text"}
 
     return NormalizedRequest(
         protocol=PROTOCOL_RESPONSES,
@@ -465,6 +504,8 @@ def _render_anthropic(chat_response: dict[str, Any]) -> dict[str, Any]:
     model = chat_response.get("model") or ""
 
     content_blocks: list[dict[str, Any]] = []
+    if message.get("reasoning_content"):
+        content_blocks.append({"type": "thinking", "thinking": message["reasoning_content"]})
     content = message.get("content")
     if content:
         content_blocks.append({"type": "text", "text": content})

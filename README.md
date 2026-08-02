@@ -146,6 +146,27 @@ requests hit the cache (`X-Vision-Cache: HIT`).
 `Host`, `Content-Length`, `Connection`, `Transfer-Encoding`, `Content-Type`,
 `Authorization`, or `Accept`.
 
+## Protocol parameter passthrough
+
+Generation parameters are translated between client and upstream protocols so
+they are not lost when protocols differ:
+
+| Parameter | Chat Completions | Anthropic Messages | OpenAI Responses |
+| --- | --- | --- | --- |
+| output cap | `max_tokens` / `max_completion_tokens` | `max_tokens` | `max_output_tokens` |
+| sampling | `temperature`, `top_p` | `temperature`, `top_p` | `temperature`, `top_p` |
+| stop | `stop` | `stop_sequences` | — |
+| tool choice | `tool_choice` | `tool_choice` (`auto/any/tool`) | `tool_choice` |
+| reasoning | `reasoning_effort` | `thinking` (budget) | `reasoning: {effort}` |
+| metadata | `metadata` | `metadata` | `metadata` |
+| parallel tools | `parallel_tool_calls` | — | `parallel_tool_calls` |
+| user / store | `user` | — | `user`, `store` |
+| structured output | `response_format` | — | `text: {format}` |
+
+Chat requests also preserve unknown extension fields verbatim. Streamed responses
+carry the same mappings (e.g. `reasoning_content` becomes an Anthropic `thinking`
+block or a Responses `reasoning` output item).
+
 ## How caching works
 
 - Images are content-addressed: `{cache_dir}/objects/sha256/ab/cd/<sha256>`, referenced as

@@ -127,7 +127,7 @@ def render_chat_to_anthropic(payload: dict[str, Any]) -> dict[str, Any]:
 
     body: dict[str, Any] = {
         "model": payload.get("model"),
-        "max_tokens": payload.get("max_tokens") or DEFAULT_MAX_TOKENS,
+        "max_tokens": payload.get("max_completion_tokens") or payload.get("max_tokens") or DEFAULT_MAX_TOKENS,
         "messages": messages,
     }
     if system_parts:
@@ -140,6 +140,10 @@ def render_chat_to_anthropic(payload: dict[str, Any]) -> dict[str, Any]:
         body["thinking"] = deepcopy(payload["thinking"])
     elif isinstance(effort, str) and effort:
         body["thinking"] = {"type": "enabled", "budget_tokens": _effort_to_budget(effort)}
+    if payload.get("tool_choice") is not None:
+        body["tool_choice"] = _chat_tool_choice_to_anthropic(payload["tool_choice"])
+    if payload.get("metadata") is not None:
+        body["metadata"] = deepcopy(payload["metadata"])
     if payload.get("stream"):
         body["stream"] = True
     tools = payload.get("tools")
@@ -155,6 +159,28 @@ def _effort_to_budget(effort: str) -> int:
         "high": 16384,
         "xhigh": 32768,
     }.get(str(effort).lower(), 8192)
+
+
+def _chat_tool_choice_to_anthropic(tool_choice: Any) -> dict[str, Any]:
+    if isinstance(tool_choice, str):
+        if tool_choice == "required":
+            return {"type": "any"}
+        if tool_choice == "none":
+            return {"type": "none"}
+        return {"type": "auto"}
+    if isinstance(tool_choice, dict) and tool_choice.get("type") == "function":
+        fn = tool_choice.get("function") or {}
+        return {"type": "tool", "name": fn.get("name", "")}
+    return {"type": "auto"}
+
+
+def _chat_tool_choice_to_responses(tool_choice: Any) -> Any:
+    if isinstance(tool_choice, str):
+        return tool_choice
+    if isinstance(tool_choice, dict) and tool_choice.get("type") == "function":
+        fn = tool_choice.get("function") or {}
+        return {"type": "function", "name": fn.get("name", "")}
+    return "auto"
 
 
 def _chat_message_to_responses_item(message: dict[str, Any]) -> list[dict[str, Any]]:
@@ -219,7 +245,9 @@ def render_chat_to_responses(payload: dict[str, Any]) -> dict[str, Any]:
     for key in ("temperature", "top_p"):
         if payload.get(key) is not None:
             body[key] = payload[key]
-    if payload.get("max_tokens") is not None:
+    if payload.get("max_completion_tokens") is not None:
+        body["max_output_tokens"] = payload["max_completion_tokens"]
+    elif payload.get("max_tokens") is not None:
         body["max_output_tokens"] = payload["max_tokens"]
     elif payload.get("max_output_tokens") is not None:
         body["max_output_tokens"] = payload["max_output_tokens"]
@@ -228,6 +256,21 @@ def render_chat_to_responses(payload: dict[str, Any]) -> dict[str, Any]:
         body["reasoning"] = {"effort": effort}
     elif isinstance(payload.get("reasoning"), dict):
         body["reasoning"] = deepcopy(payload["reasoning"])
+    if payload.get("tool_choice") is not None:
+        body["tool_choice"] = _chat_tool_choice_to_responses(payload["tool_choice"])
+    for key in ("parallel_tool_calls", "store", "user", "metadata", "truncation"):
+        if payload.get(key) is not None:
+            body[key] = deepcopy(payload[key])
+    response_format = payload.get("response_format")
+    if isinstance(response_format, dict):
+        rtype = response_format.get("type")
+        if rtype in ("json_object", "json_schema"):
+            text: dict[str, Any] = {"format": "json_schema"}
+            if isinstance(response_format.get("json_schema"), dict):
+                text["schema"] = deepcopy(response_format["json_schema"])
+            body["text"] = text
+        elif rtype == "text":
+            body["text"] = {"format": "plain_text"}
     if payload.get("stream"):
         body["stream"] = True
     tools = payload.get("tools")

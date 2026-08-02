@@ -132,6 +132,25 @@ curl http://127.0.0.1:8080/v1/chat/completions \
 `X-Vision-Header-*` 有数量与长度限制，且禁止覆盖 `Host`、`Content-Length`、
 `Connection`、`Transfer-Encoding`、`Content-Type`、`Authorization`、`Accept`。
 
+## 协议参数透传
+
+生成参数会在客户端与上游协议之间映射，避免协议不同时丢失：
+
+| 参数 | Chat Completions | Anthropic Messages | OpenAI Responses |
+| --- | --- | --- | --- |
+| 输出上限 | `max_tokens` / `max_completion_tokens` | `max_tokens` | `max_output_tokens` |
+| 采样 | `temperature`, `top_p` | `temperature`, `top_p` | `temperature`, `top_p` |
+| 停止 | `stop` | `stop_sequences` | — |
+| 工具选择 | `tool_choice` | `tool_choice`（auto/any/tool） | `tool_choice` |
+| 推理 | `reasoning_effort` | `thinking`（预算） | `reasoning: {effort}` |
+| 元数据 | `metadata` | `metadata` | `metadata` |
+| 并行工具 | `parallel_tool_calls` | — | `parallel_tool_calls` |
+| 用户 / 存储 | `user` | — | `user`, `store` |
+| 结构化输出 | `response_format` | — | `text: {format}` |
+
+Chat 请求还原样保留未知扩展字段。流式响应携带同样的映射（例如
+`reasoning_content` 变为 Anthropic 的 `thinking` 块或 Responses 的 `reasoning` 输出项）。
+
 ## 缓存原理
 
 - 图片内容寻址：`{cache_dir}/objects/sha256/ab/cd/<sha256>`，引用为

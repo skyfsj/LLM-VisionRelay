@@ -408,6 +408,98 @@ def test_render_anthropic_thinking_from_effort() -> None:
     body = render_chat_to_anthropic(payload)
     assert body["thinking"] == {"type": "enabled", "budget_tokens": 16384}
     # preserving an explicit thinking config wins over effort mapping
-    payload2 = {"model": "m", "messages": [], "reasoning_effort": "high", "thinking": {"type": "enabled", "budget_tokens": 999}}
+    payload2 = {
+        "model": "m",
+        "messages": [],
+        "reasoning_effort": "high",
+        "thinking": {"type": "enabled", "budget_tokens": 999},
+    }
     body2 = render_chat_to_anthropic(payload2)
     assert body2["thinking"] == {"type": "enabled", "budget_tokens": 999}
+
+
+# ------------------------------------------------------------------ broader passthrough audit
+def test_render_anthropic_max_completion_tokens() -> None:
+    from llm_visionrelay.upstream_protocols import render_chat_to_anthropic
+
+    body = render_chat_to_anthropic({"model": "m", "messages": [], "max_completion_tokens": 5000})
+    assert body["max_tokens"] == 5000
+    body2 = render_chat_to_anthropic({"model": "m", "messages": [], "max_tokens": 3000})
+    assert body2["max_tokens"] == 3000
+
+
+def test_render_responses_max_completion_tokens() -> None:
+    from llm_visionrelay.upstream_protocols import render_chat_to_responses
+
+    body = render_chat_to_responses({"model": "m", "messages": [], "max_completion_tokens": 5000})
+    assert body["max_output_tokens"] == 5000
+
+
+def test_tool_choice_mapping_anthropic() -> None:
+    from llm_visionrelay.upstream_protocols import render_chat_to_anthropic
+
+    body = render_chat_to_anthropic(
+        {"model": "m", "messages": [], "tool_choice": {"type": "function", "function": {"name": "f"}}}
+    )
+    assert body["tool_choice"] == {"type": "tool", "name": "f"}
+    body2 = render_chat_to_anthropic({"model": "m", "messages": [], "tool_choice": "required"})
+    assert body2["tool_choice"] == {"type": "any"}
+
+
+def test_anthropic_tool_choice_parsed_to_chat() -> None:
+    body = {
+        "model": "claude",
+        "max_tokens": 100,
+        "tool_choice": {"type": "tool", "name": "get_weather"},
+        "messages": [{"role": "user", "content": "hi"}],
+    }
+    req = parse_request(PROTOCOL_ANTHROPIC, body, CONFIG)
+    assert req.base_body["tool_choice"] == {"type": "function", "function": {"name": "get_weather"}}
+
+
+def test_responses_extra_fields_preserved() -> None:
+    body = {
+        "model": "gpt-4o",
+        "input": "hi",
+        "store": True,
+        "user": "u1",
+        "metadata": {"k": "v"},
+        "parallel_tool_calls": False,
+        "text": {"format": "json_schema", "schema": {"type": "object"}},
+    }
+    req = parse_request(PROTOCOL_RESPONSES, body, CONFIG)
+    assert req.base_body["store"] is True
+    assert req.base_body["user"] == "u1"
+    assert req.base_body["metadata"] == {"k": "v"}
+    assert req.base_body["parallel_tool_calls"] is False
+    assert req.base_body["response_format"] == {"type": "json_schema", "json_schema": {"type": "object"}}
+
+
+def test_render_responses_response_format() -> None:
+    from llm_visionrelay.upstream_protocols import render_chat_to_responses
+
+    body = render_chat_to_responses(
+        {"model": "m", "messages": [], "response_format": {"type": "json_object"}}
+    )
+    assert body["text"] == {"format": "json_schema"}
+
+
+def test_render_anthropic_thinking_block_from_reasoning() -> None:
+    from llm_visionrelay.protocols import render_response
+
+    chat = {
+        "id": "c",
+        "model": "m",
+        "created": 1,
+        "choices": [
+            {
+                "index": 0,
+                "message": {"role": "assistant", "content": "答案", "reasoning_content": "思考"},
+                "finish_reason": "stop",
+            }
+        ],
+    }
+    out = render_response(PROTOCOL_ANTHROPIC, chat)
+    assert out["content"][0]["type"] == "thinking"
+    assert out["content"][0]["thinking"] == "思考"
+    assert out["content"][1]["type"] == "text"
