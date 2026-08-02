@@ -126,6 +126,46 @@ async def test_models_rewrite_codex_catalog_shape(tmp_path) -> None:
     assert model["supports_image_detail_original"] is True
 
 
+async def test_models_rewrite_reasoning_levels_passed_through(tmp_path) -> None:
+    upstream = UpstreamMock()
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(
+            200,
+            json={
+                "object": "list",
+                "data": [
+                    {
+                        "id": "model-a",
+                        "object": "model",
+                        "supported_reasoning_levels": [
+                            {"description": "none", "effort": "none"},
+                            {"description": "high", "effort": "high"},
+                        ],
+                        "default_reasoning_level": "high",
+                    },
+                    {"id": "model-b", "object": "model"},  # no reasoning levels declared
+                ],
+            },
+        )
+
+    upstream.responder = handler
+    app, _ = make_app(tmp_path, upstream, VisionMock())
+    async with client_for(app) as client:
+        resp = await client.get("/v1/models", headers=request_headers())
+    assert resp.status_code == 200
+    data = resp.json()["data"]
+    # model-a: upstream reasoning levels preserved verbatim, not overwritten
+    a = data[0]
+    assert [r["effort"] for r in a["supported_reasoning_levels"]] == ["none", "high"]
+    assert a["default_reasoning_level"] == "high"
+    assert a["input_modalities"] == ["text", "image"]
+    # model-b: no reasoning levels fabricated; only vision injected
+    b = data[1]
+    assert "supported_reasoning_levels" not in b
+    assert b["input_modalities"] == ["text", "image"]
+
+
 # ------------------------------------------------------------------ integration: crop -> analyze derived image
 def _tool_call(name: str, args: dict, tool_id: str = "call_1") -> dict:
     return {

@@ -121,12 +121,14 @@ async def _upstream_vision_enabled(cfg: RequestConfig, model: str | None, servic
 
 
 def rewrite_models_vision(body: dict[str, Any]) -> None:
-    """Mark every model in a model-list response as image-capable.
+    """Add the middleware's vision capability to a model-list response.
 
-    The middleware makes any upstream text model vision-capable (it extracts
-    images and routes them to the vision model), so it advertises multimodal
-    input on ``/v1/models``. Handles OpenAI/Anthropic (``data``) and Codex
-    catalog (``models``) response shapes.
+    The middleware makes every upstream model vision-capable, so it merges
+    ``image`` into ``input_modalities`` and sets ``supports_image_detail_original``.
+    Everything else — including per-model ``supported_reasoning_levels``,
+    ``default_reasoning_level``, context window, etc. — is passed through from
+    the upstream untouched, because different models support different features
+    (some have no reasoning effort, some only low/high, some a ``max`` level).
     """
     for key in ("data", "models"):
         items = body.get(key)
@@ -135,7 +137,14 @@ def rewrite_models_vision(body: dict[str, Any]) -> None:
         for model in items:
             if not isinstance(model, dict):
                 continue
-            model["input_modalities"] = ["text", "image"]
+            mods = model.get("input_modalities")
+            if isinstance(mods, list):
+                lower = [str(m).lower() for m in mods]
+                if "image" not in lower:
+                    mods.append("image")
+            else:
+                mods = ["text", "image"]
+            model["input_modalities"] = mods
             model["supports_image_detail_original"] = True
 
 
