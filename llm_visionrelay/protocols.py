@@ -261,6 +261,9 @@ def _parse_anthropic(body: dict[str, Any]) -> NormalizedRequest:
             base_body[key] = body[key]
     if body.get("stop_sequences") is not None:
         base_body["stop"] = body["stop_sequences"]
+    thinking = body.get("thinking")
+    if isinstance(thinking, dict):
+        base_body["thinking"] = deepcopy(thinking)
 
     return NormalizedRequest(
         protocol=PROTOCOL_ANTHROPIC,
@@ -424,6 +427,14 @@ def _parse_responses(body: dict[str, Any]) -> NormalizedRequest:
         base_body["max_tokens"] = body["max_output_tokens"]
     elif body.get("max_tokens") is not None:
         base_body["max_tokens"] = body["max_tokens"]
+    reasoning = body.get("reasoning")
+    if isinstance(reasoning, dict):
+        base_body["reasoning"] = deepcopy(reasoning)
+        effort = reasoning.get("effort")
+        if isinstance(effort, str) and effort:
+            base_body["reasoning_effort"] = effort
+    elif isinstance(body.get("reasoning_effort"), str) and body["reasoning_effort"]:
+        base_body["reasoning_effort"] = body["reasoning_effort"]
 
     return NormalizedRequest(
         protocol=PROTOCOL_RESPONSES,

@@ -358,3 +358,56 @@ def test_chat_response_chunks_roundtrip() -> None:
     assert chunks[0]["choices"][0]["delta"]["content"] == "final"
     assert chunks[1]["choices"][0]["delta"]["tool_calls"][0]["function"]["name"] == "f"
     assert chunks[-1]["choices"][0]["finish_reason"] == "tool_calls"
+
+
+# ------------------------------------------------------------------ reasoning effort passthrough
+def test_parse_responses_reasoning_effort_preserved() -> None:
+    body = {
+        "model": "gpt-4o",
+        "input": "hi",
+        "reasoning": {"effort": "high", "summary": "auto"},
+    }
+    req = parse_request(PROTOCOL_RESPONSES, body, CONFIG)
+    assert req.base_body["reasoning_effort"] == "high"
+    assert req.base_body["reasoning"] == {"effort": "high", "summary": "auto"}
+
+
+def test_parse_responses_top_level_reasoning_effort() -> None:
+    req = parse_request(PROTOCOL_RESPONSES, {"model": "m", "input": "hi", "reasoning_effort": "low"}, CONFIG)
+    assert req.base_body["reasoning_effort"] == "low"
+
+
+def test_parse_chat_reasoning_effort_preserved() -> None:
+    req = parse_request(PROTOCOL_CHAT, {"model": "m", "messages": [], "reasoning_effort": "medium"}, CONFIG)
+    assert req.base_body["reasoning_effort"] == "medium"
+
+
+def test_parse_anthropic_thinking_preserved() -> None:
+    body = {
+        "model": "claude",
+        "max_tokens": 100,
+        "thinking": {"type": "enabled", "budget_tokens": 4096},
+        "messages": [{"role": "user", "content": "hi"}],
+    }
+    req = parse_request(PROTOCOL_ANTHROPIC, body, CONFIG)
+    assert req.base_body["thinking"] == {"type": "enabled", "budget_tokens": 4096}
+
+
+def test_render_responses_reasoning_from_effort() -> None:
+    payload = {"model": "m", "messages": [{"role": "user", "content": "hi"}], "reasoning_effort": "xhigh"}
+    from llm_visionrelay.upstream_protocols import render_chat_to_responses
+
+    body = render_chat_to_responses(payload)
+    assert body["reasoning"] == {"effort": "xhigh"}
+
+
+def test_render_anthropic_thinking_from_effort() -> None:
+    from llm_visionrelay.upstream_protocols import render_chat_to_anthropic
+
+    payload = {"model": "m", "messages": [{"role": "user", "content": "hi"}], "reasoning_effort": "high"}
+    body = render_chat_to_anthropic(payload)
+    assert body["thinking"] == {"type": "enabled", "budget_tokens": 16384}
+    # preserving an explicit thinking config wins over effort mapping
+    payload2 = {"model": "m", "messages": [], "reasoning_effort": "high", "thinking": {"type": "enabled", "budget_tokens": 999}}
+    body2 = render_chat_to_anthropic(payload2)
+    assert body2["thinking"] == {"type": "enabled", "budget_tokens": 999}

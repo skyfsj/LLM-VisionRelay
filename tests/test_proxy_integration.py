@@ -769,3 +769,25 @@ async def test_upstream_error_passed_through(tmp_path) -> None:
         )
     assert resp.status_code == 429
     assert resp.json()["error"]["code"] == "rate_limit_exceeded"
+
+
+async def test_reasoning_effort_passed_to_upstream(tmp_path) -> None:
+    """Chat requests carry reasoning_effort through the middleware untouched."""
+    from conftest import UpstreamMock as _UM
+
+    upstream = _UM()
+    captured = {}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        body = json.loads(request.content)
+        captured["reasoning_effort"] = body.get("reasoning_effort")
+        return httpx.Response(200, json={"id": "c", "object": "chat.completion", "created": 1, "model": "m", "choices": [{"index": 0, "message": {"role": "assistant", "content": "ok"}, "finish_reason": "stop"}]})
+
+    upstream.responder = handler
+    app, _ = make_app(tmp_path, upstream, VisionMock())
+    body = chat_body(messages=[{"role": "user", "content": "hi"}])
+    body["reasoning_effort"] = "high"
+    async with client_for(app) as client:
+        resp = await client.post("/v1/chat/completions", headers=request_headers(), json=body)
+    assert resp.status_code == 200
+    assert captured["reasoning_effort"] == "high"

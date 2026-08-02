@@ -12,6 +12,7 @@ import json
 import time
 import uuid
 from collections.abc import AsyncIterator
+from copy import deepcopy
 from typing import Any
 
 import httpx
@@ -134,12 +135,26 @@ def render_chat_to_anthropic(payload: dict[str, Any]) -> dict[str, Any]:
     for key in ("temperature", "top_p", "stop"):
         if payload.get(key) is not None:
             body[key] = payload[key]
+    effort = payload.get("reasoning_effort")
+    if isinstance(payload.get("thinking"), dict):
+        body["thinking"] = deepcopy(payload["thinking"])
+    elif isinstance(effort, str) and effort:
+        body["thinking"] = {"type": "enabled", "budget_tokens": _effort_to_budget(effort)}
     if payload.get("stream"):
         body["stream"] = True
     tools = payload.get("tools")
     if tools:
         body["tools"] = [_chat_tool_to_anthropic(t) for t in tools if isinstance(t, dict)]
     return body
+
+
+def _effort_to_budget(effort: str) -> int:
+    return {
+        "low": 2048,
+        "medium": 8192,
+        "high": 16384,
+        "xhigh": 32768,
+    }.get(str(effort).lower(), 8192)
 
 
 def _chat_message_to_responses_item(message: dict[str, Any]) -> list[dict[str, Any]]:
@@ -208,6 +223,11 @@ def render_chat_to_responses(payload: dict[str, Any]) -> dict[str, Any]:
         body["max_output_tokens"] = payload["max_tokens"]
     elif payload.get("max_output_tokens") is not None:
         body["max_output_tokens"] = payload["max_output_tokens"]
+    effort = payload.get("reasoning_effort")
+    if isinstance(effort, str) and effort:
+        body["reasoning"] = {"effort": effort}
+    elif isinstance(payload.get("reasoning"), dict):
+        body["reasoning"] = deepcopy(payload["reasoning"])
     if payload.get("stream"):
         body["stream"] = True
     tools = payload.get("tools")
