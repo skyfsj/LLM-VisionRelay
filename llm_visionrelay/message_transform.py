@@ -13,7 +13,7 @@ from typing import Any
 
 from llm_visionrelay.config import Config
 from llm_visionrelay.image_fetcher import ImageHandle, ImageSpec, extract_image_spec
-from llm_visionrelay.vision_client import VisionResult
+from llm_visionrelay.vision_client import VisionResult, enrich_bbox_pixels
 
 
 @dataclass(frozen=True)
@@ -57,7 +57,9 @@ def build_attachment(
     auto_analyze: bool,
 ) -> str:
     if auto_analyze and summary is not None:
-        payload = summary.json if summary.parsed_ok else {"summary": summary.text}
+        payload = enrich_bbox_pixels(summary.json, handle.width, handle.height)
+        if not summary.parsed_ok:
+            payload = {"summary": summary.text}
         body = json.dumps(payload, ensure_ascii=False, indent=2)
     else:
         body = json.dumps(

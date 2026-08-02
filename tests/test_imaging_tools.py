@@ -262,3 +262,17 @@ async def test_crop_then_analyze_derived_image(tmp_path) -> None:
     result = json.loads(crop_tool[0]["content"])
     assert result["image_ref"].startswith("img_sha256_")
     assert result["mime_type"] == "image/png"
+
+
+def test_enrich_bbox_pixels() -> None:
+    from llm_visionrelay.vision_client import enrich_bbox_pixels
+
+    result = {
+        "ocr": [{"text": "OK", "bbox": [0.0, 0.0, 0.5, 0.5]}],
+        "objects": [{"name": "btn", "bbox": [0.25, 0.25, 0.75, 0.75]}],
+    }
+    enriched = enrich_bbox_pixels(result, width=800, height=600)
+    assert enriched["ocr"][0]["bbox_px"] == [0, 0, 400, 300]
+    assert enriched["objects"][0]["bbox_px"] == [200, 150, 600, 450]
+    # no width/height -> untouched
+    assert enrich_bbox_pixels({"ocr": [{"text": "x"}]}, None, None) == {"ocr": [{"text": "x"}]}

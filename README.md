@@ -16,8 +16,11 @@ result to your text model — all while speaking the client's original protocol.
   - `POST /v1/messages` (Anthropic Messages)
   - `POST /v1/responses` (OpenAI Responses)
 - **Vision extraction pipeline** — images are fetched (base64 data URLs, `http(s)://`),
-  stored in a **content-addressed cache**, summarized by the vision model, and replaced
-  with untrusted text context before being sent to the text model.
+  stored in a **content-addressed cache**, and described by the vision model in a
+  native-multimodal style: a dense natural-language `description` plus structured
+  elements (`ocr`, `objects`, `layout`, `relationships`) each with **normalized and
+  pixel bounding boxes** (`bbox` / `bbox_px`). The image is then replaced with that
+  context before being sent to the text model.
 - **Multi-layer caching** — SQLite metadata + content-addressed file store + in-process
   LRU + `singleflight` concurrency dedup. The same image is only sent to the vision model
   once; the same URL is only re-downloaded when its alias expires.

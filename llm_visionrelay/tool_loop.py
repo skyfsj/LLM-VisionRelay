@@ -29,6 +29,7 @@ from llm_visionrelay.vision_client import (
     VisionConfig,
     VisionResult,
     VisionService,
+    enrich_bbox_pixels,
 )
 
 VISION_SYSTEM_HINT = (
@@ -444,13 +445,16 @@ class ToolLoop:
             force_refresh=parsed.force_refresh,
             ttl=ttl,
         )
+        enriched = enrich_bbox_pixels(result.json, real_handle.width, real_handle.height)
         return json.dumps(
             {
                 "image_ref": parsed.image_ref,
                 "query": parsed.query,
                 "mode": parsed.mode,
                 "cache": "hit" if result.cache_hit else "miss",
-                "result": result.json,
+                "image_width": real_handle.width,
+                "image_height": real_handle.height,
+                "result": enriched,
             },
             ensure_ascii=False,
         )
