@@ -1,0 +1,15 @@
+.venv
+venv
+__pycache__
+*.pyc
+.pytest_cache
+.ruff_cache
+data
+*.db
+*.db-wal
+*.db-shm
+tests
+.git
+.gitignore
+.DS_Store
+*.egg-info

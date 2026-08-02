@@ -1,0 +1,49 @@
+[build-system]
+requires = ["setuptools>=77"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "llm-visionrelay"
+version = "0.1.0"
+description = "LLM-VisionRelay: make any text-only chat model vision-capable"
+readme = "README.md"
+requires-python = ">=3.12"
+license = "MIT"
+license-files = ["LICENSE"]
+dependencies = [
+    "fastapi>=0.111",
+    "uvicorn>=0.30",
+    "httpx>=0.27",
+    "aiosqlite>=0.20",
+    "pydantic>=2.7",
+    "Pillow>=10.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.0",
+    "pytest-asyncio>=0.23",
+    "ruff>=0.5",
+]
+
+[project.scripts]
+llm-visionrelay = "llm_visionrelay.cli:main"
+
+[tool.setuptools.packages.find]
+include = ["llm_visionrelay*"]
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["tests"]
+
+[tool.ruff]
+line-length = 110
+target-version = "py312"
+src = ["llm_visionrelay"]
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "W", "UP"]
+ignore = ["E501"]
+
+[tool.ruff.format]
+quote-style = "double"

@@ -1,0 +1,25 @@
+services:
+  llm-visionrelay:
+    build:
+      context: .
+      args:
+        HTTP_PROXY: ${HTTP_PROXY:-}
+        HTTPS_PROXY: ${HTTPS_PROXY:-}
+        NO_PROXY: ${NO_PROXY:-}
+    image: llm-visionrelay:latest
+    container_name: llm-visionrelay
+    restart: unless-stopped
+    ports:
+      - "8080:8080"
+    volumes:
+      - ./data:/data
+    command:
+      - python
+      - -m
+      - llm_visionrelay
+      - --host
+      - 0.0.0.0
+      - --port
+      - "8080"
+      - --cache-dir
+      - /data
