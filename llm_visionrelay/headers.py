@@ -197,7 +197,7 @@ class RequestConfig:
     tools_enabled: bool = True
     cache_ttl: float = 30 * 24 * 3600
     force_refresh: bool = False
-    vision_timeout: float = 90.0
+    vision_reasoning_effort: str | None = None
     upstream_vision: str = "auto"
     max_images: int | None = None
     max_image_bytes: int | None = None
@@ -278,7 +278,7 @@ def parse_request_headers(headers: Mapping[str, str], config: Config) -> Request
         tools_enabled=tools_enabled,
         cache_ttl=cache_ttl,
         force_refresh=force_refresh,
-        vision_timeout=config.vision_timeout,
+        vision_reasoning_effort=None,
         upstream_vision=upstream_vision,
         max_images=max_images,
         max_image_bytes=max_image_bytes,

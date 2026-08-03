@@ -24,7 +24,12 @@ class Config:
     max_total_image_bytes: int = 256 * 1024 * 1024
 
     default_timeout: float = 60.0
-    vision_timeout: float = 90.0
+
+    # Reasoning levels the vision model supports (low -> high order independent;
+    # ordering is defined by the ladder in reasoning.py). When the client agent
+    # requests a reasoning effort the vision model lacks, the middleware falls
+    # back to the next lower supported level.
+    vision_reasoning_levels: list[str] = field(default_factory=lambda: ["low", "medium", "high"])
 
     vision_max_concurrency: int = 8
     vision_max_retries: int = 2

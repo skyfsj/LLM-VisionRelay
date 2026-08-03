@@ -79,7 +79,7 @@ class VisionConfig:
     model: str
     authorization: str | None
     headers: dict[str, str]
-    timeout: float
+    reasoning_effort: str | None = None
     params: dict[str, Any] = field(default_factory=dict)
     params_hash: str = ""
 
@@ -276,9 +276,8 @@ class VisionService:
         self._pool = VisionConcurrencyPool(config.vision_max_concurrency)
         self._client = httpx.AsyncClient(
             transport=config.vision_transport,
-            timeout=config.vision_timeout,
+            timeout=None,
         )
-
     async def close(self) -> None:
         await self._client.aclose()
 
@@ -636,6 +635,10 @@ class VisionService:
         payload: dict[str, Any] = {"model": vision.model, "temperature": 0, "messages": messages}
         if vision.params:
             payload.update(vision.params)
+        # Match the client agent's reasoning intensity; never override an
+        # explicit X-Vision-Params value.
+        if vision.reasoning_effort and "reasoning_effort" not in payload:
+            payload["reasoning_effort"] = vision.reasoning_effort
 
         group_key = self._pool.group_key(vision.base_url, vision.authorization, vision.model)
         attempts = self.config.vision_max_retries + 1
@@ -654,15 +657,31 @@ class VisionService:
                     continue
                 raise VisionAnalysisFailed(f"vision request failed: {exc}") from exc
 
-            if resp.status_code == 429 or resp.status_code >= 500:
+            if resp.status_code == 429 or resp.status_code == 408 or resp.status_code >= 500:
                 if attempt < attempts - 1:
                     await asyncio.sleep(self._backoff(attempt))
                     continue
                 raise VisionAnalysisFailed(f"vision model returned HTTP {resp.status_code}")
             if resp.status_code >= 400:
                 raise VisionAnalysisFailed(f"vision model returned HTTP {resp.status_code}")
-            break
 
+            try:
+                content = self._parse_vision_content(resp)
+            except VisionInvalidResponse:
+                if attempt < attempts - 1:
+                    await asyncio.sleep(self._backoff(attempt))
+                    continue
+                raise
+            if not content or not content.strip():
+                if attempt < attempts - 1:
+                    await asyncio.sleep(self._backoff(attempt))
+                    continue
+                raise VisionInvalidResponse("vision model returned empty content")
+            return content
+        raise VisionAnalysisFailed("vision call failed")
+
+    @staticmethod
+    def _parse_vision_content(resp: httpx.Response) -> str:
         try:
             data = resp.json()
         except json.JSONDecodeError as exc:

@@ -84,7 +84,6 @@ def _vision_cfg() -> VisionConfig:
         model="vision-model",
         authorization="Bearer VISION",
         headers={},
-        timeout=30,
     )
 
 

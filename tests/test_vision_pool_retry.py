@@ -214,3 +214,162 @@ async def test_retry_on_transport_timeout(tmp_path) -> None:
         resp = await client.post("/v1/chat/completions", headers=request_headers(), json=_image_body())
     assert resp.status_code == 200
     assert transport.calls == 2  # timeout then success
+
+
+# ------------------------------------------------------------------ inference-error retry
+def _vision_ok(content: str) -> bytes:
+    return json.dumps(
+        {
+            "id": "v1",
+            "object": "chat.completion",
+            "created": int(time.time()),
+            "model": "m",
+            "choices": [
+                {
+                    "index": 0,
+                    "message": {"role": "assistant", "content": content},
+                    "finish_reason": "stop",
+                }
+            ],
+        }
+    ).encode()
+
+
+def _valid_vision_json() -> str:
+    return json.dumps(
+        {
+            "summary": "ok",
+            "ocr": [],
+            "objects": [],
+            "relationships": [],
+            "warnings": [],
+            "uncertainties": [],
+        }
+    )
+
+
+class _SequencedVisionContent:
+    """Vision mock returning a queue of bodies/statuses, then a valid response."""
+
+    def __init__(self, items: list[bytes | int]) -> None:
+        self.items: list[bytes | int] = list(items)
+        self.calls: list[httpx.Request] = []
+
+    def handler(self, request: httpx.Request) -> httpx.Response:
+        self.calls.append(request)
+        if self.items:
+            item = self.items.pop(0)
+            if isinstance(item, int):
+                return httpx.Response(item, json={"error": {"message": f"boom {item}"}})
+            return httpx.Response(200, content=item)
+        return httpx.Response(200, content=_vision_ok(_valid_vision_json()))
+
+
+async def test_retry_on_empty_vision_content(tmp_path) -> None:
+    vision = _SequencedVisionContent([_vision_ok("")])
+    app, _ = make_app(tmp_path, UpstreamMock(), vision, vision_max_retries=2, vision_retry_base_delay=0.01)
+    async with client_for(app) as client:
+        resp = await client.post("/v1/chat/completions", headers=request_headers(), json=_image_body())
+    assert resp.status_code == 200
+    assert len(vision.calls) == 2  # empty content then success
+
+
+async def test_retry_on_invalid_vision_json(tmp_path) -> None:
+    vision = _SequencedVisionContent([b"definitely not json"])
+    app, _ = make_app(tmp_path, UpstreamMock(), vision, vision_max_retries=2, vision_retry_base_delay=0.01)
+    async with client_for(app) as client:
+        resp = await client.post("/v1/chat/completions", headers=request_headers(), json=_image_body())
+    assert resp.status_code == 200
+    assert len(vision.calls) == 2
+
+
+async def test_retry_on_408(tmp_path) -> None:
+    vision = _SequencedVisionContent([408])
+    app, _ = make_app(tmp_path, UpstreamMock(), vision, vision_max_retries=2, vision_retry_base_delay=0.01)
+    async with client_for(app) as client:
+        resp = await client.post("/v1/chat/completions", headers=request_headers(), json=_image_body())
+    assert resp.status_code == 200
+    assert len(vision.calls) == 2
+
+
+async def test_retries_exhausted_on_empty_vision_content(tmp_path) -> None:
+    vision = _SequencedVisionContent([_vision_ok(""), _vision_ok("")])
+    app, _ = make_app(tmp_path, UpstreamMock(), vision, vision_max_retries=1, vision_retry_base_delay=0.01)
+    async with client_for(app) as client:
+        resp = await client.post("/v1/chat/completions", headers=request_headers(), json=_image_body())
+    assert resp.status_code == 502
+    assert resp.json()["error"]["code"] == "vision_invalid_response"
+    assert len(vision.calls) == 2  # initial + 1 retry
+
+
+class _TimeoutCapturingVision:
+    def __init__(self) -> None:
+        self.calls: list[float | None] = []
+
+    def handler(self, request: httpx.Request) -> httpx.Response:
+        t = request.extensions.get("timeout")
+        if isinstance(t, dict):
+            self.calls.append(t.get("pool"))
+        else:
+            self.calls.append(t.timeout if isinstance(t, httpx.Timeout) else t)
+        return httpx.Response(200, content=_vision_ok(_valid_vision_json()))
+
+
+async def test_no_vision_timeout_by_default(tmp_path) -> None:
+    vision = _TimeoutCapturingVision()
+    app, _ = make_app(tmp_path, UpstreamMock(), vision)
+    async with client_for(app) as client:
+        resp = await client.post("/v1/chat/completions", headers=request_headers(), json=_image_body())
+    assert resp.status_code == 200
+    assert vision.calls == [None]  # no timeout set; only the agent's interrupt stops it
+
+
+# ------------------------------------------------------------------ agent reasoning -> vision
+class _ReasoningCapturingVision:
+    def __init__(self) -> None:
+        self.calls: list[str | None] = []
+
+    def handler(self, request: httpx.Request) -> httpx.Response:
+        body = json.loads(request.content)
+        self.calls.append(body.get("reasoning_effort"))
+        return httpx.Response(200, content=_vision_ok(_valid_vision_json()))
+
+
+def _image_body_with_effort(effort: str) -> dict:
+    body = _image_body()
+    body["reasoning_effort"] = effort
+    return body
+
+
+async def test_vision_reasoning_matches_agent_effort(tmp_path) -> None:
+    vision = _ReasoningCapturingVision()
+    app, _ = make_app(tmp_path, UpstreamMock(), vision)
+    async with client_for(app) as client:
+        resp = await client.post(
+            "/v1/chat/completions", headers=request_headers(), json=_image_body_with_effort("high")
+        )
+    assert resp.status_code == 200
+    assert vision.calls == ["high"]
+
+
+async def test_vision_reasoning_falls_back_to_next_lower(tmp_path) -> None:
+    vision = _ReasoningCapturingVision()
+    app, _ = make_app(tmp_path, UpstreamMock(), vision, vision_reasoning_levels=["low", "medium"])
+    async with client_for(app) as client:
+        resp = await client.post(
+            "/v1/chat/completions", headers=request_headers(), json=_image_body_with_effort("high")
+        )
+    assert resp.status_code == 200
+    assert vision.calls == ["medium"]
+
+
+async def test_vision_reasoning_separates_cache(tmp_path) -> None:
+    vision = _ReasoningCapturingVision()
+    app, _ = make_app(tmp_path, UpstreamMock(), vision)
+    async with client_for(app) as client:
+        for effort in ("low", "high", "low"):
+            resp = await client.post(
+                "/v1/chat/completions", headers=request_headers(), json=_image_body_with_effort(effort)
+            )
+            assert resp.status_code == 200
+    assert len(vision.calls) == 2  # low + high; repeated low is a separate cache hit

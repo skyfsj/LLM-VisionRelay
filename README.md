@@ -71,7 +71,7 @@ CLI options (all runtime settings come from the command line):
 | `--max-image-size` | max single image size (MiB) | `20` |
 | `--max-images-per-request` | max images per request | `8` |
 | `--max-total-image-bytes` | max total image bytes per request (MiB) | `50` |
-| `--timeout` / `--vision-timeout` | upstream / vision model timeout (s) | `60` / `90` |
+| `--timeout` | upstream text model timeout (s) | `60` |
 | `--vision-max-concurrency` | max concurrent vision calls per (base-url, key, model) group | `8` |
 | `--vision-max-retries` | vision retries on 429/5xx/transport errors | `2` |
 | `--management-token` | optional token for `/internal/*` endpoints (sent via `X-Management-Token`) | none |
@@ -172,6 +172,14 @@ they are not lost when protocols differ:
 Chat requests also preserve unknown extension fields verbatim. Streamed responses
 carry the same mappings (e.g. `reasoning_content` becomes an Anthropic `thinking`
 block or a Responses `reasoning` output item).
+
+The vision model is called with the same reasoning intensity the agent requested
+(`reasoning_effort` / `reasoning.effort`). If the vision model does not support a
+level that high, the middleware automatically falls back to the next lower
+supported level (supported levels are configurable via `vision_reasoning_levels`,
+default `low`/`medium`/`high`). Reasoning level is part of the vision cache key,
+so different intensities never reuse each other's analysis. No timeout is imposed
+on the vision model — only the client agent's own disconnect/interrupt stops it.
 
 ## How caching works
 

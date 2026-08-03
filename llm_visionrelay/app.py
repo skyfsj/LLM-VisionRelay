@@ -46,6 +46,11 @@ from llm_visionrelay.protocols import (
     render_sse_lines,
     translate_stream_lines,
 )
+from llm_visionrelay.reasoning import (
+    requested_reasoning_from_body,
+    resolve_reasoning_effort,
+)
+from llm_visionrelay.security import sha256_hex
 from llm_visionrelay.tool_loop import (
     VISION_SYSTEM_HINT,
     ToolLoop,
@@ -91,17 +96,23 @@ class ProxyServices:
         await self.db.close()
 
 
-def build_vision_config(cfg: RequestConfig) -> VisionConfig | None:
+def build_vision_config(cfg: RequestConfig, config: Config) -> VisionConfig | None:
     if not cfg.vision_ready:
         return None
+    reasoning = resolve_reasoning_effort(cfg.vision_reasoning_effort, config.vision_reasoning_levels)
+    params_hash = cfg.vision_params_hash
+    if reasoning:
+        # Separate the vision cache per reasoning level so different intensities
+        # never reuse each other's analysis.
+        params_hash = sha256_hex(f"{cfg.vision_params_hash}:{reasoning}")
     return VisionConfig(
         base_url=cfg.vision_base_url,
         model=cfg.vision_model,
         authorization=cfg.vision_authorization,
         headers=cfg.vision_headers,
-        timeout=cfg.vision_timeout,
+        reasoning_effort=reasoning,
         params=cfg.vision_params,
-        params_hash=cfg.vision_params_hash,
+        params_hash=params_hash,
     )
 
 
@@ -463,6 +474,7 @@ async def handle_protocol(request: Request, services: ProxyServices, protocol: s
 
         normalized = parse_request(protocol, body, config)
         messages = normalized.messages
+        cfg.vision_reasoning_effort = requested_reasoning_from_body(normalized.base_body)
 
         if protocol == cfg.upstream_protocol and not _messages_have_images(messages):
             passthrough_resp = await _literal_passthrough(
@@ -479,7 +491,7 @@ async def handle_protocol(request: Request, services: ProxyServices, protocol: s
         validate_image_count(collected, config, max_images=max_images)
         specs = extract_specs(collected)
 
-        vision_cfg = build_vision_config(cfg)
+        vision_cfg = build_vision_config(cfg, config)
         summaries: list = []
         upstream_vision = specs and await _upstream_vision_enabled(cfg, normalized.model, services)
         if specs and upstream_vision:

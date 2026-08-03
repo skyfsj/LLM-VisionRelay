@@ -12,8 +12,8 @@ from llm_visionrelay.errors import (
 from llm_visionrelay.headers import parse_bool, parse_request_headers
 
 
-def _cfg() -> Config:
-    return Config()
+def _cfg(**kw) -> Config:
+    return Config(**kw)
 
 
 def _headers(**kw) -> dict:
