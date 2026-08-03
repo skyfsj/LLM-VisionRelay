@@ -82,6 +82,7 @@ class VisionConfig:
     reasoning_effort: str | None = None
     thinking: str = "auto"
     max_tokens: int | None = None
+    reasoning_budget: int | None = None
     params: dict[str, Any] = field(default_factory=dict)
     params_hash: str = ""
 
@@ -673,6 +674,10 @@ class VisionService:
         # chain-of-thought forever (never overrides an explicit params value).
         if vision.max_tokens is not None and "max_tokens" not in payload:
             payload["max_tokens"] = vision.max_tokens
+        # Cap the chain-of-thought budget so thinking can never eat the whole
+        # max_tokens and leave an empty answer (finish_reason=length, content="").
+        if vision.reasoning_budget is not None and "reasoning_budget" not in payload:
+            payload["reasoning_budget"] = vision.reasoning_budget
 
         group_key = self._pool.group_key(vision.base_url, vision.authorization, vision.model)
         attempts = self.config.vision_max_retries + 1

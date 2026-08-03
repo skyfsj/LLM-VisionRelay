@@ -381,7 +381,14 @@ class _ReasoningPayloadVision:
 
     def handler(self, request: httpx.Request) -> httpx.Response:
         body = json.loads(request.content)
-        self.calls.append((body.get("reasoning_effort"), body.get("thinking"), body.get("max_tokens")))
+        self.calls.append(
+            (
+                body.get("reasoning_effort"),
+                body.get("thinking"),
+                body.get("max_tokens"),
+                body.get("reasoning_budget"),
+            )
+        )
         return httpx.Response(200, content=_vision_ok(_valid_vision_json()))
 
 
@@ -395,7 +402,7 @@ async def test_vision_reasoning_off_header(tmp_path) -> None:
             json=_image_body_with_effort("high"),
         )
     assert resp.status_code == 200
-    assert vision.calls == [(None, {"type": "disabled"}, 8192)]
+    assert vision.calls == [(None, {"type": "disabled"}, 8192, 2048)]
 
 
 async def test_vision_reasoning_effort_header_overrides_body(tmp_path) -> None:
@@ -408,7 +415,7 @@ async def test_vision_reasoning_effort_header_overrides_body(tmp_path) -> None:
             json=_image_body_with_effort("high"),
         )
     assert resp.status_code == 200
-    assert vision.calls == [("low", None, 8192)]  # header overrides body "high"
+    assert vision.calls == [("low", None, 8192, 2048)]  # header overrides body "high"
 
 
 async def test_vision_reasoning_effort_fallback_via_header(tmp_path) -> None:
@@ -421,7 +428,7 @@ async def test_vision_reasoning_effort_fallback_via_header(tmp_path) -> None:
             json=_image_body(),
         )
     assert resp.status_code == 200
-    assert vision.calls == [("medium", None, 8192)]  # max not supported -> next lower
+    assert vision.calls == [("medium", None, 8192, 2048)]  # max not supported -> next lower
 
 
 async def test_vision_max_tokens_header_override(tmp_path) -> None:
@@ -434,7 +441,33 @@ async def test_vision_max_tokens_header_override(tmp_path) -> None:
             json=_image_body_with_effort("high"),
         )
     assert resp.status_code == 200
-    assert vision.calls == [("high", None, 2048)]
+    assert vision.calls == [("high", None, 2048, 1024)]  # budget clamped to half
+
+
+async def test_vision_reasoning_budget_header_override(tmp_path) -> None:
+    vision = _ReasoningPayloadVision()
+    app, _ = make_app(tmp_path, UpstreamMock(), vision)
+    async with client_for(app) as client:
+        resp = await client.post(
+            "/v1/chat/completions",
+            headers=request_headers(extra={"X-Vision-Reasoning-Budget": "512"}),
+            json=_image_body(),
+        )
+    assert resp.status_code == 200
+    assert vision.calls == [(None, None, 8192, 512)]
+
+
+async def test_vision_reasoning_budget_clamped_to_half_max_tokens(tmp_path) -> None:
+    vision = _ReasoningPayloadVision()
+    app, _ = make_app(tmp_path, UpstreamMock(), vision)
+    async with client_for(app) as client:
+        resp = await client.post(
+            "/v1/chat/completions",
+            headers=request_headers(extra={"X-Vision-Max-Tokens": "100", "X-Vision-Reasoning-Budget": "2048"}),
+            json=_image_body(),
+        )
+    assert resp.status_code == 200
+    assert vision.calls == [(None, None, 100, 50)]  # budget > half max_tokens -> clamped
 
 
 async def test_vision_max_tokens_separates_cache(tmp_path) -> None:

@@ -145,6 +145,7 @@ requests hit the cache (`X-Vision-Cache: HIT`).
 | `X-Vision-Params` | extra JSON body params for the vision request (e.g. thinking / reasoning effort) |
 | `X-Vision-Reasoning` | vision-model thinking: `on` / `off` / `auto` (default `auto`). `off` sends `thinking: disabled` |
 | `X-Vision-Reasoning-Effort` | override the vision reasoning level: `none` / `low` / `medium` / `high` / `max` / `auto` (default `auto`; falls back to the next lower supported level) |
+| `X-Vision-Reasoning-Budget` | cap the vision chain-of-thought tokens (0 disables), overrides `--vision-reasoning-budget`; keeps thinking from starving the answer (default 2048, clamped to half of `max_tokens`) |
 | `X-Vision-Max-Tokens` | cap the vision model's output tokens (1–200000), overrides `--vision-max-tokens`; prevents chain-of-thought runaway |
 | `X-Vision-Max-Images` | per-request image count cap (1–4096), overrides `--max-images-per-request` |
 | `X-Vision-Max-Image-Bytes` | per-request single-image size cap in MiB (1–200) |
@@ -185,8 +186,10 @@ lower supported level (supported levels are configurable via
 thinking toggle are part of the vision cache key, so different intensities never
 reuse each other's analysis. Vision output tokens are capped (`vision_max_tokens`,
 default 8192) so a small reasoning model cannot loop its chain-of-thought
-forever. No timeout is imposed on the vision model — only the client agent's own
-disconnect/interrupt stops it.
+forever, and the chain-of-thought budget is capped (`vision_reasoning_budget`,
+default 2048, clamped to half of `max_tokens`) so thinking can never eat the
+whole output and leave an empty answer. No timeout is imposed on the vision model
+— only the client agent's own disconnect/interrupt stops it.
 
 ## How caching works
 

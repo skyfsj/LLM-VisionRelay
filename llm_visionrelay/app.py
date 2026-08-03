@@ -104,12 +104,23 @@ def build_vision_config(cfg: RequestConfig, config: Config) -> VisionConfig | No
     else:
         reasoning = resolve_reasoning_effort(cfg.vision_reasoning_effort, config.vision_reasoning_levels)
     max_tokens = cfg.vision_max_tokens if cfg.vision_max_tokens is not None else config.vision_max_tokens
+    budget = (
+        cfg.vision_reasoning_budget
+        if cfg.vision_reasoning_budget is not None
+        else config.vision_reasoning_budget
+    )
+    if budget is not None and max_tokens is not None:
+        # Always reserve at least half of max_tokens for the answer so a long
+        # chain-of-thought can never starve the content out (empty result).
+        budget = min(budget, max_tokens // 2)
+    if budget == 0:
+        budget = None
     params_hash = cfg.vision_params_hash
-    if reasoning or cfg.vision_reasoning != "auto" or max_tokens is not None:
+    if reasoning or cfg.vision_reasoning != "auto" or max_tokens is not None or budget is not None:
         # Separate the vision cache per reasoning state / output cap so different
         # intensities or truncations never reuse each other's analysis.
         params_hash = sha256_hex(
-            f"{cfg.vision_params_hash}:{reasoning or 'none'}:{cfg.vision_reasoning}:{max_tokens or ''}"
+            f"{cfg.vision_params_hash}:{reasoning or 'none'}:{cfg.vision_reasoning}:{max_tokens or ''}:{budget or ''}"
         )
     return VisionConfig(
         base_url=cfg.vision_base_url,
@@ -119,6 +130,7 @@ def build_vision_config(cfg: RequestConfig, config: Config) -> VisionConfig | No
         reasoning_effort=reasoning,
         thinking=cfg.vision_reasoning,
         max_tokens=max_tokens,
+        reasoning_budget=budget,
         params=cfg.vision_params,
         params_hash=params_hash,
     )

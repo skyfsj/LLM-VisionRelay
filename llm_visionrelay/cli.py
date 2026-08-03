@@ -48,6 +48,12 @@ def build_parser() -> argparse.ArgumentParser:
         help="cap on vision model output tokens (prevents CoT runaway; default: 8192)",
     )
     parser.add_argument(
+        "--vision-reasoning-budget",
+        type=int,
+        default=2048,
+        help="cap on vision chain-of-thought budget so content is never starved (default: 2048)",
+    )
+    parser.add_argument(
         "--vision-max-concurrency",
         type=int,
         default=8,
@@ -96,6 +102,7 @@ def config_from_args(args: argparse.Namespace) -> Config:
         default_timeout=args.timeout,
         vision_max_concurrency=args.vision_max_concurrency,
         vision_max_tokens=args.vision_max_tokens,
+        vision_reasoning_budget=args.vision_reasoning_budget,
         vision_max_retries=args.vision_max_retries,
         vision_retry_base_delay=args.vision_retry_base_delay,
         vision_retry_max_delay=args.vision_retry_max_delay,

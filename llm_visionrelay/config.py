@@ -36,6 +36,12 @@ class Config:
     # the generation so it always terminates (not a timeout, just an output cap).
     vision_max_tokens: int = 8192
 
+    # Cap on the vision model's chain-of-thought budget (reasoning_budget).
+    # Without it, a high-effort model can burn the whole max_tokens on thinking
+    # and return empty content (finish_reason=length, content=""). This budget is
+    # clamped so at least half of max_tokens is reserved for the actual answer.
+    vision_reasoning_budget: int = 2048
+
     vision_max_concurrency: int = 8
     vision_max_retries: int = 2
     vision_retry_base_delay: float = 0.3

@@ -202,6 +202,7 @@ class RequestConfig:
     vision_reasoning: str = "auto"
     vision_reasoning_effort: str | None = None
     vision_reasoning_override: str | None = None
+    vision_reasoning_budget: int | None = None
     vision_max_tokens: int | None = None
     upstream_vision: str = "auto"
     max_images: int | None = None
@@ -262,6 +263,11 @@ def parse_request_headers(headers: Mapping[str, str], config: Config) -> Request
             "(expected none|low|medium|high|max|auto)"
         )
     max_tokens = _parse_int_opt(h.get("x-vision-max-tokens"), "X-Vision-Max-Tokens", 1, 200000)
+    reasoning_budget = _parse_int_opt(
+        h.get("x-vision-reasoning-budget"), "X-Vision-Reasoning-Budget", 0, 200000
+    )
+    if reasoning_budget == 0:
+        reasoning_budget = None
 
     max_images = _parse_int_opt(h.get("x-vision-max-images"), "X-Vision-Max-Images", 1, 4096)
     max_image_bytes = _parse_mib_opt(h.get("x-vision-max-image-bytes"), "X-Vision-Max-Image-Bytes", 1, 200)
@@ -301,6 +307,7 @@ def parse_request_headers(headers: Mapping[str, str], config: Config) -> Request
         vision_reasoning=vision_reasoning,
         vision_reasoning_effort=None,
         vision_reasoning_override=reasoning_override,
+        vision_reasoning_budget=reasoning_budget,
         vision_max_tokens=max_tokens,
         upstream_vision=upstream_vision,
         max_images=max_images,
