@@ -143,6 +143,9 @@ requests hit the cache (`X-Vision-Cache: HIT`).
 | `X-Vision-Force-Refresh` | bypass the summary cache (default `false`) |
 | `X-Vision-Cache-Namespace` | tenant namespace (default: derived from `Authorization`) |
 | `X-Vision-Params` | extra JSON body params for the vision request (e.g. thinking / reasoning effort) |
+| `X-Vision-Reasoning` | vision-model thinking: `on` / `off` / `auto` (default `auto`). `off` sends `thinking: disabled` |
+| `X-Vision-Reasoning-Effort` | override the vision reasoning level: `none` / `low` / `medium` / `high` / `max` / `auto` (default `auto`; falls back to the next lower supported level) |
+| `X-Vision-Max-Tokens` | cap the vision model's output tokens (1–200000), overrides `--vision-max-tokens`; prevents chain-of-thought runaway |
 | `X-Vision-Max-Images` | per-request image count cap (1–4096), overrides `--max-images-per-request` |
 | `X-Vision-Max-Image-Bytes` | per-request single-image size cap in MiB (1–200) |
 | `X-Vision-Max-Total-Image-Bytes` | per-request total image bytes cap in MiB (1–2048) |
@@ -174,12 +177,16 @@ carry the same mappings (e.g. `reasoning_content` becomes an Anthropic `thinking
 block or a Responses `reasoning` output item).
 
 The vision model is called with the same reasoning intensity the agent requested
-(`reasoning_effort` / `reasoning.effort`). If the vision model does not support a
-level that high, the middleware automatically falls back to the next lower
-supported level (supported levels are configurable via `vision_reasoning_levels`,
-default `low`/`medium`/`high`). Reasoning level is part of the vision cache key,
-so different intensities never reuse each other's analysis. No timeout is imposed
-on the vision model — only the client agent's own disconnect/interrupt stops it.
+(`reasoning_effort` / `reasoning.effort`), overridable per request via
+`X-Vision-Reasoning` / `X-Vision-Reasoning-Effort`. If the vision model does not
+support a level that high, the middleware automatically falls back to the next
+lower supported level (supported levels are configurable via
+`vision_reasoning_levels`, default `low`/`medium`/`high`). Reasoning level and
+thinking toggle are part of the vision cache key, so different intensities never
+reuse each other's analysis. Vision output tokens are capped (`vision_max_tokens`,
+default 8192) so a small reasoning model cannot loop its chain-of-thought
+forever. No timeout is imposed on the vision model — only the client agent's own
+disconnect/interrupt stops it.
 
 ## How caching works
 

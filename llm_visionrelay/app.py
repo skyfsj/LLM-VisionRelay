@@ -99,18 +99,26 @@ class ProxyServices:
 def build_vision_config(cfg: RequestConfig, config: Config) -> VisionConfig | None:
     if not cfg.vision_ready:
         return None
-    reasoning = resolve_reasoning_effort(cfg.vision_reasoning_effort, config.vision_reasoning_levels)
+    if cfg.vision_reasoning == "off":
+        reasoning: str | None = None
+    else:
+        reasoning = resolve_reasoning_effort(cfg.vision_reasoning_effort, config.vision_reasoning_levels)
+    max_tokens = cfg.vision_max_tokens if cfg.vision_max_tokens is not None else config.vision_max_tokens
     params_hash = cfg.vision_params_hash
-    if reasoning:
-        # Separate the vision cache per reasoning level so different intensities
-        # never reuse each other's analysis.
-        params_hash = sha256_hex(f"{cfg.vision_params_hash}:{reasoning}")
+    if reasoning or cfg.vision_reasoning != "auto" or max_tokens is not None:
+        # Separate the vision cache per reasoning state / output cap so different
+        # intensities or truncations never reuse each other's analysis.
+        params_hash = sha256_hex(
+            f"{cfg.vision_params_hash}:{reasoning or 'none'}:{cfg.vision_reasoning}:{max_tokens or ''}"
+        )
     return VisionConfig(
         base_url=cfg.vision_base_url,
         model=cfg.vision_model,
         authorization=cfg.vision_authorization,
         headers=cfg.vision_headers,
         reasoning_effort=reasoning,
+        thinking=cfg.vision_reasoning,
+        max_tokens=max_tokens,
         params=cfg.vision_params,
         params_hash=params_hash,
     )
@@ -474,7 +482,8 @@ async def handle_protocol(request: Request, services: ProxyServices, protocol: s
 
         normalized = parse_request(protocol, body, config)
         messages = normalized.messages
-        cfg.vision_reasoning_effort = requested_reasoning_from_body(normalized.base_body)
+        body_effort = requested_reasoning_from_body(normalized.base_body)
+        cfg.vision_reasoning_effort = cfg.vision_reasoning_override or body_effort
 
         if protocol == cfg.upstream_protocol and not _messages_have_images(messages):
             passthrough_resp = await _literal_passthrough(

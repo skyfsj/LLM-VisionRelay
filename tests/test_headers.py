@@ -290,3 +290,23 @@ def test_passthrough_headers_parsed() -> None:
     # authorization is carried by cfg.authorization, never duplicated in passthrough
     assert "authorization" not in pt
     assert cfg.authorization == "Bearer TEXT_KEY"
+
+
+def test_vision_reasoning_headers() -> None:
+    cfg = parse_request_headers(_headers(**{"X-Vision-Reasoning": "off"}), _cfg())
+    assert cfg.vision_reasoning == "off"
+    assert cfg.vision_reasoning_override is None
+    cfg2 = parse_request_headers(_headers(**{"X-Vision-Reasoning-Effort": "medium"}), _cfg())
+    assert cfg2.vision_reasoning_override == "medium"
+    assert cfg2.vision_reasoning == "auto"
+    cfg3 = parse_request_headers(
+        _headers(**{"X-Vision-Reasoning": "on", "X-Vision-Reasoning-Effort": "high"}), _cfg()
+    )
+    assert cfg3.vision_reasoning == "on"
+    assert cfg3.vision_reasoning_override == "high"
+    cfg4 = parse_request_headers(_headers(**{"X-Vision-Reasoning-Effort": "auto"}), _cfg())
+    assert cfg4.vision_reasoning_override is None
+    with pytest.raises(InvalidHeader):
+        parse_request_headers(_headers(**{"X-Vision-Reasoning": "max"}), _cfg())
+    with pytest.raises(InvalidHeader):
+        parse_request_headers(_headers(**{"X-Vision-Reasoning-Effort": "ultra"}), _cfg())

@@ -80,6 +80,8 @@ class VisionConfig:
     authorization: str | None
     headers: dict[str, str]
     reasoning_effort: str | None = None
+    thinking: str = "auto"
+    max_tokens: int | None = None
     params: dict[str, Any] = field(default_factory=dict)
     params_hash: str = ""
 
@@ -635,10 +637,18 @@ class VisionService:
         payload: dict[str, Any] = {"model": vision.model, "temperature": 0, "messages": messages}
         if vision.params:
             payload.update(vision.params)
-        # Match the client agent's reasoning intensity; never override an
-        # explicit X-Vision-Params value.
-        if vision.reasoning_effort and "reasoning_effort" not in payload:
+        # Client agent controls reasoning via X-Vision-Reasoning / Effort.
+        # "off" disables thinking (best-effort; some servers ignore it); otherwise
+        # inject the resolved effort unless the client pinned one via params.
+        if vision.thinking == "off":
+            payload.pop("reasoning_effort", None)
+            payload["thinking"] = {"type": "disabled"}
+        elif vision.reasoning_effort and "reasoning_effort" not in payload:
             payload["reasoning_effort"] = vision.reasoning_effort
+        # Cap output tokens so a small reasoning model cannot loop its
+        # chain-of-thought forever (never overrides an explicit params value).
+        if vision.max_tokens is not None and "max_tokens" not in payload:
+            payload["max_tokens"] = vision.max_tokens
 
         group_key = self._pool.group_key(vision.base_url, vision.authorization, vision.model)
         attempts = self.config.vision_max_retries + 1

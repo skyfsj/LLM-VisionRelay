@@ -42,6 +42,12 @@ def build_parser() -> argparse.ArgumentParser:
         help="default upstream timeout in seconds (default: 60)",
     )
     parser.add_argument(
+        "--vision-max-tokens",
+        type=int,
+        default=8192,
+        help="cap on vision model output tokens (prevents CoT runaway; default: 8192)",
+    )
+    parser.add_argument(
         "--vision-max-concurrency",
         type=int,
         default=8,
@@ -89,6 +95,7 @@ def config_from_args(args: argparse.Namespace) -> Config:
         max_total_image_bytes=args.max_total_image_bytes * 1024 * 1024,
         default_timeout=args.timeout,
         vision_max_concurrency=args.vision_max_concurrency,
+        vision_max_tokens=args.vision_max_tokens,
         vision_max_retries=args.vision_max_retries,
         vision_retry_base_delay=args.vision_retry_base_delay,
         vision_retry_max_delay=args.vision_retry_max_delay,

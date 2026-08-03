@@ -373,3 +373,79 @@ async def test_vision_reasoning_separates_cache(tmp_path) -> None:
             )
             assert resp.status_code == 200
     assert len(vision.calls) == 2  # low + high; repeated low is a separate cache hit
+
+
+class _ReasoningPayloadVision:
+    def __init__(self) -> None:
+        self.calls: list[tuple] = []
+
+    def handler(self, request: httpx.Request) -> httpx.Response:
+        body = json.loads(request.content)
+        self.calls.append((body.get("reasoning_effort"), body.get("thinking"), body.get("max_tokens")))
+        return httpx.Response(200, content=_vision_ok(_valid_vision_json()))
+
+
+async def test_vision_reasoning_off_header(tmp_path) -> None:
+    vision = _ReasoningPayloadVision()
+    app, _ = make_app(tmp_path, UpstreamMock(), vision)
+    async with client_for(app) as client:
+        resp = await client.post(
+            "/v1/chat/completions",
+            headers=request_headers(extra={"X-Vision-Reasoning": "off"}),
+            json=_image_body_with_effort("high"),
+        )
+    assert resp.status_code == 200
+    assert vision.calls == [(None, {"type": "disabled"}, 8192)]
+
+
+async def test_vision_reasoning_effort_header_overrides_body(tmp_path) -> None:
+    vision = _ReasoningPayloadVision()
+    app, _ = make_app(tmp_path, UpstreamMock(), vision)
+    async with client_for(app) as client:
+        resp = await client.post(
+            "/v1/chat/completions",
+            headers=request_headers(extra={"X-Vision-Reasoning-Effort": "low"}),
+            json=_image_body_with_effort("high"),
+        )
+    assert resp.status_code == 200
+    assert vision.calls == [("low", None, 8192)]  # header overrides body "high"
+
+
+async def test_vision_reasoning_effort_fallback_via_header(tmp_path) -> None:
+    vision = _ReasoningPayloadVision()
+    app, _ = make_app(tmp_path, UpstreamMock(), vision, vision_reasoning_levels=["low", "medium"])
+    async with client_for(app) as client:
+        resp = await client.post(
+            "/v1/chat/completions",
+            headers=request_headers(extra={"X-Vision-Reasoning-Effort": "max"}),
+            json=_image_body(),
+        )
+    assert resp.status_code == 200
+    assert vision.calls == [("medium", None, 8192)]  # max not supported -> next lower
+
+
+async def test_vision_max_tokens_header_override(tmp_path) -> None:
+    vision = _ReasoningPayloadVision()
+    app, _ = make_app(tmp_path, UpstreamMock(), vision)
+    async with client_for(app) as client:
+        resp = await client.post(
+            "/v1/chat/completions",
+            headers=request_headers(extra={"X-Vision-Max-Tokens": "2048"}),
+            json=_image_body_with_effort("high"),
+        )
+    assert resp.status_code == 200
+    assert vision.calls == [("high", None, 2048)]
+
+
+async def test_vision_max_tokens_separates_cache(tmp_path) -> None:
+    vision = _ReasoningPayloadVision()
+    app, _ = make_app(tmp_path, UpstreamMock(), vision)
+    async with client_for(app) as client:
+        for mt in ("2048", "8192", "2048"):
+            resp = await client.post(
+                "/v1/chat/completions",
+                headers=request_headers(extra={"X-Vision-Max-Tokens": mt}),
+                json=_image_body(),
+            )
+            assert resp.status_code == 200
+    assert len(vision.calls) == 2  # 2048 + 8192; repeated 2048 is a cache hit

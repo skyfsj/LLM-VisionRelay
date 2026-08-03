@@ -39,6 +39,8 @@ _FORBIDDEN_VISION_HEADERS = frozenset(
     }
 )
 
+_REASONING_EFFORTS = frozenset({"none", "low", "medium", "high", "max"})
+
 # Headers never forwarded upstream: protocol-managed (hop-by-hop), IP-related,
 # and the middleware's own settings.
 _PASSTHROUGH_FORBIDDEN = frozenset(
@@ -197,7 +199,10 @@ class RequestConfig:
     tools_enabled: bool = True
     cache_ttl: float = 30 * 24 * 3600
     force_refresh: bool = False
+    vision_reasoning: str = "auto"
     vision_reasoning_effort: str | None = None
+    vision_reasoning_override: str | None = None
+    vision_max_tokens: int | None = None
     upstream_vision: str = "auto"
     max_images: int | None = None
     max_image_bytes: int | None = None
@@ -243,6 +248,21 @@ def parse_request_headers(headers: Mapping[str, str], config: Config) -> Request
     if upstream_vision not in ("auto", "true", "false"):
         raise InvalidHeader(f"invalid X-Upstream-Vision {upstream_vision!r} (expected true|false|auto)")
 
+    vision_reasoning = (h.get("x-vision-reasoning") or "auto").strip().lower()
+    if vision_reasoning not in ("auto", "on", "off"):
+        raise InvalidHeader(
+            f"invalid X-Vision-Reasoning {vision_reasoning!r} (expected on|off|auto)"
+        )
+    reasoning_override = (h.get("x-vision-reasoning-effort") or "auto").strip().lower()
+    if reasoning_override == "auto":
+        reasoning_override = None
+    elif reasoning_override not in _REASONING_EFFORTS:
+        raise InvalidHeader(
+            f"invalid X-Vision-Reasoning-Effort {reasoning_override!r} "
+            "(expected none|low|medium|high|max|auto)"
+        )
+    max_tokens = _parse_int_opt(h.get("x-vision-max-tokens"), "X-Vision-Max-Tokens", 1, 200000)
+
     max_images = _parse_int_opt(h.get("x-vision-max-images"), "X-Vision-Max-Images", 1, 4096)
     max_image_bytes = _parse_mib_opt(h.get("x-vision-max-image-bytes"), "X-Vision-Max-Image-Bytes", 1, 200)
     max_total_bytes = _parse_mib_opt(
@@ -278,7 +298,10 @@ def parse_request_headers(headers: Mapping[str, str], config: Config) -> Request
         tools_enabled=tools_enabled,
         cache_ttl=cache_ttl,
         force_refresh=force_refresh,
+        vision_reasoning=vision_reasoning,
         vision_reasoning_effort=None,
+        vision_reasoning_override=reasoning_override,
+        vision_max_tokens=max_tokens,
         upstream_vision=upstream_vision,
         max_images=max_images,
         max_image_bytes=max_image_bytes,

@@ -31,6 +31,11 @@ class Config:
     # back to the next lower supported level.
     vision_reasoning_levels: list[str] = field(default_factory=lambda: ["low", "medium", "high"])
 
+    # Hard cap on the vision model's output tokens. Small MoE models with high
+    # reasoning effort can loop their chain-of-thought indefinitely; this bounds
+    # the generation so it always terminates (not a timeout, just an output cap).
+    vision_max_tokens: int = 8192
+
     vision_max_concurrency: int = 8
     vision_max_retries: int = 2
     vision_retry_base_delay: float = 0.3
