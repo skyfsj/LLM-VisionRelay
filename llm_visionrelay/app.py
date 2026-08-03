@@ -219,7 +219,8 @@ async def _literal_passthrough(
     if cfg.authorization:
         headers["Authorization"] = cfg.authorization
     if cfg.passthrough_headers:
-        headers.update({k: v for k, v in cfg.passthrough_headers.items() if k.lower() not in headers})
+        existing = {h.lower() for h in headers}
+        headers.update({k: v for k, v in cfg.passthrough_headers.items() if k.lower() not in existing})
     content = raw_bytes if raw_bytes is not None else json.dumps(body, ensure_ascii=False).encode()
     if not body.get("stream"):
         resp = await services.upstream.post_bytes(url, headers, content)

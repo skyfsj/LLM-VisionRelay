@@ -54,7 +54,8 @@ class UpstreamClient:
         if cfg.authorization:
             headers["Authorization"] = cfg.authorization
         if cfg.passthrough_headers:
-            headers.update({k: v for k, v in cfg.passthrough_headers.items() if k.lower() not in headers})
+            existing = {h.lower() for h in headers}
+            headers.update({k: v for k, v in cfg.passthrough_headers.items() if k.lower() not in existing})
         return headers
 
     async def post_bytes(self, url: str, headers: dict[str, str], content: bytes) -> httpx.Response:

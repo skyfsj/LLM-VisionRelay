@@ -49,6 +49,7 @@ _PASSTHROUGH_FORBIDDEN = frozenset(
         "transfer-encoding",
         "upgrade",
         "content-type",
+        "authorization",
         # client IP / forwarding metadata — never leak or spoof
         "forwarded",
         "x-forwarded-for",

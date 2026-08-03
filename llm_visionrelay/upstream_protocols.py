@@ -640,7 +640,8 @@ class UpstreamAdapter:
         if cfg.authorization:
             headers["Authorization"] = cfg.authorization
         if cfg.passthrough_headers:
-            headers.update({k: v for k, v in cfg.passthrough_headers.items() if k.lower() not in headers})
+            existing = {h.lower() for h in headers}
+            headers.update({k: v for k, v in cfg.passthrough_headers.items() if k.lower() not in existing})
         return headers
 
     async def request_json(self, cfg: RequestConfig, chat_payload: dict[str, Any]) -> UpstreamResult:

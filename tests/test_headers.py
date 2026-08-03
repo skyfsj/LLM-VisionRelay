@@ -287,5 +287,6 @@ def test_passthrough_headers_parsed() -> None:
     assert "x-vision-model" not in pt
     assert "x-forwarded-for" not in pt
     assert "host" not in pt
-    # authorization is forwarded (it's the upstream key)
-    assert pt.get("authorization") == "Bearer TEXT_KEY"
+    # authorization is carried by cfg.authorization, never duplicated in passthrough
+    assert "authorization" not in pt
+    assert cfg.authorization == "Bearer TEXT_KEY"

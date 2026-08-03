@@ -863,3 +863,29 @@ async def test_literal_passthrough_raw_body_bytes(tmp_path) -> None:
         )
     assert resp.status_code == 200
     assert captured["content"] == body  # byte-for-byte transparent
+
+
+async def test_no_duplicate_authorization_forwarded(tmp_path) -> None:
+    upstream = UpstreamMock()
+    captured = {}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        auths = request.headers.multi_items()
+        captured["authorization_count"] = sum(1 for k, _ in auths if k.lower() == "authorization")
+        captured["accept_count"] = sum(1 for k, _ in auths if k.lower() == "accept")
+        return httpx.Response(
+            200,
+            json={"id": "c", "object": "chat.completion", "created": 1, "model": "m", "choices": [{"index": 0, "message": {"role": "assistant", "content": "ok"}, "finish_reason": "stop"}]},
+        )
+
+    upstream.responder = handler
+    app, _ = make_app(tmp_path, upstream, VisionMock())
+    async with client_for(app) as client:
+        resp = await client.post(
+            "/v1/chat/completions",
+            headers=request_headers(),
+            json=chat_body(messages=[{"role": "user", "content": "hi"}]),
+        )
+    assert resp.status_code == 200
+    assert captured["authorization_count"] == 1, captured
+    assert captured["accept_count"] == 1, captured
