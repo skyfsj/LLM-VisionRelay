@@ -197,6 +197,9 @@ disconnect/interrupt stops it.
 - Later requests with the same image reuse the summary — no vision call.
 - Same URL: not re-downloaded while the URL alias is valid; when it expires, a conditional
   request (`If-None-Match` / `If-Modified-Since`) checks whether the content changed.
+- If a client disconnects mid-analysis, the summary batch keeps running in the
+  background and caches the finished results, so a resumed session never re-reads
+  the images.
 - Concurrent requests for the same image are deduplicated via `singleflight`.
 - If the vision model fails and an expired cache entry exists, it is used with a warning
   marker rather than failing the request.

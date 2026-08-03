@@ -519,7 +519,7 @@ async def handle_protocol(request: Request, services: ProxyServices, protocol: s
             if (cfg.auto_analyze or cfg.tools_enabled) and vision_cfg is None:
                 raise MissingVisionConfig()
             if cfg.auto_analyze and vision_cfg is not None:
-                summaries = await services.vision_service.ensure_summaries(
+                summaries = await services.vision_service.ensure_summaries_shielded(
                     cfg.tenant_id,
                     handles,
                     vision_cfg,

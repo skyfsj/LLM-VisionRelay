@@ -280,10 +280,34 @@ class VisionService:
             transport=config.vision_transport,
             timeout=None,
         )
+        self._background_tasks: set[asyncio.Task] = set()
+
     async def close(self) -> None:
+        if self._background_tasks:
+            for task in list(self._background_tasks):
+                task.cancel()
+            await asyncio.gather(*self._background_tasks, return_exceptions=True)
         await self._client.aclose()
 
     aclose = close
+
+    def _track(self, coro: Awaitable[Any]) -> asyncio.Task:
+        """Start a coroutine as a task that outlives the requesting client."""
+        task = asyncio.create_task(coro)
+        self._background_tasks.add(task)
+        task.add_done_callback(self._background_tasks.discard)
+        return task
+
+    async def ensure_summaries_shielded(self, *args: Any, **kwargs: Any) -> list[VisionResult | None]:
+        """Run :meth:`ensure_summaries` in a shielded background task.
+
+        If the client disconnects mid-analysis, the remaining images still get
+        translated and cached in the background, so a resumed session never
+        re-reads the images. The handler only awaits the result while the client
+        is still connected.
+        """
+        task = self._track(self.ensure_summaries(*args, **kwargs))
+        return await asyncio.shield(task)
 
     # ------------------------------------------------------------------ summarize batch
     async def ensure_summaries(
