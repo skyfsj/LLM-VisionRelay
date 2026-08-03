@@ -20,8 +20,8 @@ class Config:
     port: int = 8080
 
     max_image_bytes: int = 20 * 1024 * 1024
-    max_images_per_request: int = 8
-    max_total_image_bytes: int = 50 * 1024 * 1024
+    max_images_per_request: int = 512
+    max_total_image_bytes: int = 256 * 1024 * 1024
 
     default_timeout: float = 60.0
     vision_timeout: float = 90.0

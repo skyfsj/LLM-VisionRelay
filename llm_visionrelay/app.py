@@ -433,8 +433,12 @@ async def handle_protocol(request: Request, services: ProxyServices, protocol: s
             status_code = passthrough_resp.status_code
             return passthrough_resp
 
-        collected = collect_image_blocks(messages, config)
-        validate_image_count(collected, config)
+        max_images = cfg.max_images or config.max_images_per_request
+        max_image_bytes = cfg.max_image_bytes or config.max_image_bytes
+        max_total_image_bytes = cfg.max_total_image_bytes or config.max_total_image_bytes
+
+        collected = collect_image_blocks(messages, config, max_image_bytes=max_image_bytes)
+        validate_image_count(collected, config, max_images=max_images)
         specs = extract_specs(collected)
 
         vision_cfg = build_vision_config(cfg)
@@ -446,7 +450,13 @@ async def handle_protocol(request: Request, services: ProxyServices, protocol: s
             handles: list = []
             new_messages = messages
         elif specs:
-            handles = await services.image_service.ingest(cfg.tenant_id, specs, ttl=cfg.cache_ttl)
+            handles = await services.image_service.ingest(
+                cfg.tenant_id,
+                specs,
+                ttl=cfg.cache_ttl,
+                max_total_image_bytes=max_total_image_bytes,
+                max_image_bytes=max_image_bytes,
+            )
             if (cfg.auto_analyze or cfg.tools_enabled) and vision_cfg is None:
                 raise MissingVisionConfig()
             if cfg.auto_analyze and vision_cfg is not None:

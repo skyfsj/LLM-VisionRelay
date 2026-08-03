@@ -228,3 +228,37 @@ def test_upstream_protocol_parsed_and_validated() -> None:
     assert cfg2.upstream_protocol == "chat"
     with pytest.raises(InvalidHeader):
         parse_request_headers(_headers(**{"X-Upstream-Protocol": "ftp"}), _cfg())
+
+
+def test_vision_max_override_headers() -> None:
+    cfg = parse_request_headers(
+        _headers(
+            **{
+                "X-Vision-Max-Images": "100",
+                "X-Vision-Max-Image-Bytes": "5",
+                "X-Vision-Max-Total-Image-Bytes": "200",
+            }
+        ),
+        _cfg(),
+    )
+    assert cfg.max_images == 100
+    assert cfg.max_image_bytes == 5 * 1024 * 1024
+    assert cfg.max_total_image_bytes == 200 * 1024 * 1024
+
+
+def test_vision_max_override_absent() -> None:
+    cfg = parse_request_headers(_headers(), _cfg())
+    assert cfg.max_images is None
+    assert cfg.max_image_bytes is None
+    assert cfg.max_total_image_bytes is None
+
+
+@pytest.mark.parametrize("header,value", [("X-Vision-Max-Images", "0"), ("X-Vision-Max-Images", "99999")])
+def test_vision_max_override_out_of_range(header: str, value: str) -> None:
+    with pytest.raises(InvalidHeader):
+        parse_request_headers(_headers(**{header: value}), _cfg())
+
+
+def test_vision_max_override_non_int() -> None:
+    with pytest.raises(InvalidHeader):
+        parse_request_headers(_headers(**{"X-Vision-Max-Images": "many"}), _cfg())

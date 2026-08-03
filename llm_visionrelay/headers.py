@@ -87,6 +87,24 @@ def _parse_ttl(value: str | None) -> float:
     return ttl
 
 
+def _parse_int_opt(value: str | None, name: str, minimum: int, maximum: int) -> int | None:
+    if value is None or str(value).strip() == "":
+        return None
+    try:
+        parsed = int(str(value).strip())
+    except ValueError as exc:
+        raise InvalidHeader(f"invalid {name} value: {value!r}") from exc
+    if not (minimum <= parsed <= maximum):
+        raise InvalidHeader(f"{name} must be between {minimum} and {maximum}")
+    return parsed
+
+
+def _parse_mib_opt(value: str | None, name: str, minimum: int, maximum: int) -> int | None:
+    """Parse a MiB-sized header value into bytes."""
+    mib = _parse_int_opt(value, name, minimum, maximum)
+    return None if mib is None else mib * 1024 * 1024
+
+
 def _validate_base_url(value: str | None, name: str) -> str | None:
     if not value:
         return None
@@ -137,6 +155,9 @@ class RequestConfig:
     force_refresh: bool = False
     vision_timeout: float = 90.0
     upstream_vision: str = "auto"
+    max_images: int | None = None
+    max_image_bytes: int | None = None
+    max_total_image_bytes: int | None = None
     tenant_id: str = ""
 
     @property
@@ -177,6 +198,12 @@ def parse_request_headers(headers: Mapping[str, str], config: Config) -> Request
     if upstream_vision not in ("auto", "true", "false"):
         raise InvalidHeader(f"invalid X-Upstream-Vision {upstream_vision!r} (expected true|false|auto)")
 
+    max_images = _parse_int_opt(h.get("x-vision-max-images"), "X-Vision-Max-Images", 1, 4096)
+    max_image_bytes = _parse_mib_opt(h.get("x-vision-max-image-bytes"), "X-Vision-Max-Image-Bytes", 1, 200)
+    max_total_bytes = _parse_mib_opt(
+        h.get("x-vision-max-total-image-bytes"), "X-Vision-Max-Total-Image-Bytes", 1, 2048
+    )
+
     namespace = h.get("x-vision-cache-namespace")
     if namespace:
         tenant_id = tenant_id_from_namespace(namespace)
@@ -208,5 +235,8 @@ def parse_request_headers(headers: Mapping[str, str], config: Config) -> Request
         force_refresh=force_refresh,
         vision_timeout=config.vision_timeout,
         upstream_vision=upstream_vision,
+        max_images=max_images,
+        max_image_bytes=max_image_bytes,
+        max_total_image_bytes=max_total_bytes,
         tenant_id=tenant_id,
     )

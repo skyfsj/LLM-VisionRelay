@@ -69,8 +69,9 @@ class _FetchOutcome:
     error: Exception | None = None
 
 
-def parse_data_url(url: str, config: Config) -> ImageSpec:
+def parse_data_url(url: str, config: Config, max_image_bytes: int | None = None) -> ImageSpec:
     """Parse a ``data:image/...;base64,...`` URL into bytes + mime."""
+    limit = max_image_bytes or config.max_image_bytes
     try:
         header, _, payload = url.partition(",")
         if not url.startswith("data:") or not header.endswith(";base64"):
@@ -80,7 +81,7 @@ def parse_data_url(url: str, config: Config) -> ImageSpec:
         raw = base64.b64decode(payload, validate=True)
     except (binascii.Error, ValueError) as exc:
         raise InvalidImage(f"invalid base64 data: {exc}") from exc
-    if len(raw) > config.max_image_bytes:
+    if len(raw) > limit:
         raise ImageTooLarge()
     if not imaging.is_allowed_mime(mime):
         sniffed = imaging.sniff_mime(raw)
@@ -90,7 +91,7 @@ def parse_data_url(url: str, config: Config) -> ImageSpec:
     return ImageSpec(kind="base64", data=raw, mime=mime)
 
 
-def extract_image_spec(block: dict[str, Any], config: Config) -> ImageSpec:
+def extract_image_spec(block: dict[str, Any], config: Config, max_image_bytes: int | None = None) -> ImageSpec:
     image_url = block.get("image_url")
     if not isinstance(image_url, dict):
         raise InvalidImage("image_url block must be an object")
@@ -100,7 +101,7 @@ def extract_image_spec(block: dict[str, Any], config: Config) -> ImageSpec:
     detail = image_url.get("detail")
     detail = detail if isinstance(detail, str) and detail else "auto"
     if url.startswith("data:"):
-        spec = parse_data_url(url, config)
+        spec = parse_data_url(url, config, max_image_bytes=max_image_bytes)
         spec.detail = detail
         return spec
     if url.startswith("http://") or url.startswith("https://"):
@@ -125,25 +126,33 @@ class ImageService:
     aclose = close
 
     async def ingest(
-        self, tenant: str, specs: list[ImageSpec], ttl: float | None = None
+        self,
+        tenant: str,
+        specs: list[ImageSpec],
+        ttl: float | None = None,
+        max_total_image_bytes: int | None = None,
+        max_image_bytes: int | None = None,
     ) -> list[ImageHandle]:
+        total_limit = max_total_image_bytes or self.config.max_total_image_bytes
         total = 0
         handles: list[ImageHandle] = []
         for spec in specs:
-            handle = await self._ingest_one(tenant, spec, ttl)
+            handle = await self._ingest_one(tenant, spec, ttl, max_image_bytes=max_image_bytes)
             total += handle.size_bytes
-            if total > self.config.max_total_image_bytes:
+            if total > total_limit:
                 from llm_visionrelay.errors import TotalImageBytesExceeded
 
                 raise TotalImageBytesExceeded()
             handles.append(handle)
         return handles
 
-    async def _ingest_one(self, tenant: str, spec: ImageSpec, ttl: float | None = None) -> ImageHandle:
+    async def _ingest_one(
+        self, tenant: str, spec: ImageSpec, ttl: float | None = None, max_image_bytes: int | None = None
+    ) -> ImageHandle:
         if spec.kind == "base64":
             return await self._ingest_bytes(tenant, spec.data, spec.mime, "base64", None, spec.detail)
         if spec.kind == "url":
-            return await self._ingest_url(tenant, spec.url, spec.detail, ttl)
+            return await self._ingest_url(tenant, spec.url, spec.detail, ttl, max_image_bytes=max_image_bytes)
         raise InvalidImage("unknown image source")
 
     async def _ingest_bytes(
@@ -183,7 +192,12 @@ class ImageService:
         return await self._ingest_bytes(tenant, data, mime, source_kind, None, detail)
 
     async def _ingest_url(
-        self, tenant: str, url: str, detail: str | None, ttl: float | None = None
+        self,
+        tenant: str,
+        url: str,
+        detail: str | None,
+        ttl: float | None = None,
+        max_image_bytes: int | None = None,
     ) -> ImageHandle:
         now = time.time()
         alias_ttl = ttl if ttl is not None else self.config_ttl()
@@ -200,7 +214,7 @@ class ImageService:
 
         conditional_etag = alias.get("etag") if alias else None
         conditional_lm = alias.get("last_modified") if alias else None
-        outcome = await self._fetch_url(url, conditional_etag, conditional_lm)
+        outcome = await self._fetch_url(url, conditional_etag, conditional_lm, max_image_bytes=max_image_bytes)
         if outcome.status == "not_modified" and alias is not None:
             await self.db.touch_url_alias(tenant, url_hash, now + alias_ttl)
             registered = await self.db.get_registered_image(tenant, alias["image_sha256"])
@@ -259,7 +273,14 @@ class ImageService:
             detail=detail,
         )
 
-    async def _fetch_url(self, url: str, etag: str | None, last_modified: str | None) -> _FetchOutcome:
+    async def _fetch_url(
+        self,
+        url: str,
+        etag: str | None,
+        last_modified: str | None,
+        max_image_bytes: int | None = None,
+    ) -> _FetchOutcome:
+        self._max_image_bytes = max_image_bytes or self.config.max_image_bytes
         headers: dict[str, str] = {
             "Accept": "image/*, image/png, image/jpeg, image/gif, image/webp, image/bmp",
             "User-Agent": "llm-visionrelay/0.1",
@@ -311,7 +332,7 @@ class ImageService:
             content_length = resp.headers.get("content-length")
             if content_length:
                 try:
-                    if int(content_length) > self.config.max_image_bytes:
+                    if int(content_length) > self._max_image_bytes:
                         raise ImageTooLarge()
                 except ValueError:
                     pass
@@ -320,7 +341,7 @@ class ImageService:
             async for chunk in resp.aiter_bytes():
                 chunks.append(chunk)
                 size += len(chunk)
-                if size > self.config.max_image_bytes:
+                if size > self._max_image_bytes:
                     raise ImageTooLarge()
             data = b"".join(chunks)
             content_type = (resp.headers.get("content-type") or "").split(";")[0].strip().lower()

@@ -28,7 +28,9 @@ class CollectedImage:
     spec: ImageSpec
 
 
-def collect_image_blocks(messages: list[dict[str, Any]], config: Config) -> list[CollectedImage]:
+def collect_image_blocks(
+    messages: list[dict[str, Any]], config: Config, max_image_bytes: int | None = None
+) -> list[CollectedImage]:
     """Walk messages and collect ``image_url`` blocks with their positions."""
     collected: list[CollectedImage] = []
     for mi, message in enumerate(messages):
@@ -44,10 +46,9 @@ def collect_image_blocks(messages: list[dict[str, Any]], config: Config) -> list
                 collected.append(
                     CollectedImage(
                         position=ImagePosition(mi, bi),
-                        spec=extract_image_spec(block, config),
+                        spec=extract_image_spec(block, config, max_image_bytes=max_image_bytes),
                     )
                 )
-    return collected
     return collected
 
 
@@ -101,8 +102,9 @@ def rebuild_messages(
     return new_messages
 
 
-def validate_image_count(collected: list[CollectedImage], config: Config) -> None:
-    if len(collected) > config.max_images_per_request:
+def validate_image_count(collected: list[CollectedImage], config: Config, max_images: int | None = None) -> None:
+    limit = max_images or config.max_images_per_request
+    if len(collected) > limit:
         from llm_visionrelay.errors import ImageLimitExceeded
 
         raise ImageLimitExceeded()

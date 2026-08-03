@@ -143,6 +143,9 @@ requests hit the cache (`X-Vision-Cache: HIT`).
 | `X-Vision-Force-Refresh` | bypass the summary cache (default `false`) |
 | `X-Vision-Cache-Namespace` | tenant namespace (default: derived from `Authorization`) |
 | `X-Vision-Params` | extra JSON body params for the vision request (e.g. thinking / reasoning effort) |
+| `X-Vision-Max-Images` | per-request image count cap (1–4096), overrides `--max-images-per-request` |
+| `X-Vision-Max-Image-Bytes` | per-request single-image size cap in MiB (1–200) |
+| `X-Vision-Max-Total-Image-Bytes` | per-request total image bytes cap in MiB (1–2048) |
 | `X-Request-ID` | request id echoed on the response (generated if absent) |
 
 `X-Vision-Header-*` headers have count and length limits, and cannot override

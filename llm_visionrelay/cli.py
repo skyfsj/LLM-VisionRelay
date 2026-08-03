@@ -26,8 +26,8 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--max-images-per-request",
         type=int,
-        default=8,
-        help="maximum images per request (default: 8)",
+        default=512,
+        help="maximum images per request (safety cap, default: 512)",
     )
     parser.add_argument(
         "--max-total-image-bytes",
