@@ -10,7 +10,7 @@ methods used for direct streaming.
 from __future__ import annotations
 
 import json
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any
 
 import httpx
@@ -32,6 +32,7 @@ def build_upstream_url(base_url: str) -> str:
 class UpstreamResult:
     status_code: int
     body: dict[str, Any]
+    headers: dict[str, str] = field(default_factory=dict)
 
 
 class UpstreamClient:
@@ -52,6 +53,8 @@ class UpstreamClient:
         headers = {"Content-Type": "application/json", "Accept": "application/json"}
         if cfg.authorization:
             headers["Authorization"] = cfg.authorization
+        if cfg.passthrough_headers:
+            headers.update({k: v for k, v in cfg.passthrough_headers.items() if k.lower() not in headers})
         return headers
 
     async def post_bytes(self, url: str, headers: dict[str, str], content: bytes) -> httpx.Response:

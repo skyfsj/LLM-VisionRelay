@@ -612,6 +612,7 @@ class UpstreamAdapter:
     def __init__(self, protocol: str, client: UpstreamClient) -> None:
         self.protocol = protocol
         self.client = client
+        self.last_stream_headers: dict[str, str] = {}
 
     def endpoint(self, base_url: str) -> str:
         return upstream_chat_endpoint(base_url, self.protocol)
@@ -638,13 +639,15 @@ class UpstreamAdapter:
         headers = {"Content-Type": "application/json", "Accept": "application/json"}
         if cfg.authorization:
             headers["Authorization"] = cfg.authorization
+        if cfg.passthrough_headers:
+            headers.update({k: v for k, v in cfg.passthrough_headers.items() if k.lower() not in headers})
         return headers
 
     async def request_json(self, cfg: RequestConfig, chat_payload: dict[str, Any]) -> UpstreamResult:
         url = self.endpoint(cfg.upstream_base_url)
         content = json.dumps(self.render(chat_payload), ensure_ascii=False).encode()
         resp = await self.client.post_bytes(url, self._headers(cfg), content)
-        return UpstreamResult(resp.status_code, self.parse_json(resp))
+        return UpstreamResult(resp.status_code, self.parse_json(resp), dict(resp.headers))
 
     async def stream_chunks(
         self, cfg: RequestConfig, chat_payload: dict[str, Any]
@@ -654,6 +657,7 @@ class UpstreamAdapter:
         url = self.endpoint(cfg.upstream_base_url)
         content = json.dumps(rendered, ensure_ascii=False).encode()
         resp = await self.client.stream_bytes(url, self._headers(cfg), content)
+        self.last_stream_headers = dict(resp.headers)
         state = _new_stream_state(self.protocol)
         try:
             async for line in resp.aiter_lines():

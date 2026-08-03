@@ -262,3 +262,30 @@ def test_vision_max_override_out_of_range(header: str, value: str) -> None:
 def test_vision_max_override_non_int() -> None:
     with pytest.raises(InvalidHeader):
         parse_request_headers(_headers(**{"X-Vision-Max-Images": "many"}), _cfg())
+
+
+def test_passthrough_headers_parsed() -> None:
+    cfg = parse_request_headers(
+        {
+            "Authorization": "Bearer TEXT_KEY",
+            "X-Upstream-Base-URL": "https://api.deepseek.com",
+            "User-Agent": "my-agent/1.0",
+            "X-Custom-Trace": "abc",
+            "X-Vision-Model": "qwen",
+            "Cookie": "session=secret",
+            "X-Forwarded-For": "10.0.0.1",
+            "Host": "example.com",
+        },
+        _cfg(),
+    )
+    pt = cfg.passthrough_headers
+    assert pt.get("user-agent") == "my-agent/1.0"
+    assert pt.get("x-custom-trace") == "abc"
+    # full passthrough: cookie and other client headers are forwarded
+    assert pt.get("cookie") == "session=secret"
+    # middleware settings / IP / protocol-managed are excluded
+    assert "x-vision-model" not in pt
+    assert "x-forwarded-for" not in pt
+    assert "host" not in pt
+    # authorization is forwarded (it's the upstream key)
+    assert pt.get("authorization") == "Bearer TEXT_KEY"

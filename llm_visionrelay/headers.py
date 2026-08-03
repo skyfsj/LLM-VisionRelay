@@ -39,6 +39,49 @@ _FORBIDDEN_VISION_HEADERS = frozenset(
     }
 )
 
+# Headers never forwarded upstream: protocol-managed (hop-by-hop), IP-related,
+# and the middleware's own settings.
+_PASSTHROUGH_FORBIDDEN = frozenset(
+    {
+        "host",
+        "content-length",
+        "connection",
+        "transfer-encoding",
+        "upgrade",
+        "content-type",
+        # client IP / forwarding metadata — never leak or spoof
+        "forwarded",
+        "x-forwarded-for",
+        "x-forwarded-host",
+        "x-forwarded-proto",
+        "x-forwarded-port",
+        "x-real-ip",
+        "x-client-ip",
+        "true-client-ip",
+        "cf-connecting-ip",
+        "x-original-forwarded-for",
+        "x-original-remote-addr",
+    }
+)
+# Middleware-reserved prefixes are consumed by the middleware, never forwarded.
+_PASSTHROUGH_EXCLUDE_PREFIXES = ("x-vision-", "x-upstream-")
+
+
+def _passthrough_headers(h: dict[str, str]) -> dict[str, str]:
+    """Full client-header passthrough: forward everything except the middleware's
+    settings headers and protocol-managed (hop-by-hop) headers."""
+    out: dict[str, str] = {}
+    for name, value in h.items():
+        ln = str(name).lower()
+        if ln in _PASSTHROUGH_FORBIDDEN:
+            continue
+        if ln in ("x-management-token",):
+            continue  # never forward the management token
+        if ln.startswith("x-vision-") or ln.startswith("x-upstream-"):
+            continue  # middleware settings
+        out[ln] = value
+    return out
+
 
 def parse_bool(value: str | None, name: str, default: bool) -> bool:
     if value is None:
@@ -158,6 +201,7 @@ class RequestConfig:
     max_images: int | None = None
     max_image_bytes: int | None = None
     max_total_image_bytes: int | None = None
+    passthrough_headers: dict[str, str] = field(default_factory=dict)
     tenant_id: str = ""
 
     @property
@@ -238,5 +282,6 @@ def parse_request_headers(headers: Mapping[str, str], config: Config) -> Request
         max_images=max_images,
         max_image_bytes=max_image_bytes,
         max_total_image_bytes=max_total_bytes,
+        passthrough_headers=_passthrough_headers(h),
         tenant_id=tenant_id,
     )

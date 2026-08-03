@@ -9,7 +9,7 @@ external tools are never executed and pass straight through to the client.
 from __future__ import annotations
 
 import json
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any
 
 from llm_visionrelay.config import Config
@@ -225,6 +225,7 @@ class ToolLoopResult:
     vision_tool_calls: int = 0
     buffered: bool = False
     exceeded: bool = False
+    upstream_headers: dict[str, str] = field(default_factory=dict)
 
 
 def _tool_error_content(code: str, message: str) -> str:
@@ -261,21 +262,23 @@ class ToolLoop:
         buffered = initial_response is not None
         response = initial_response
         self._last_status = 200
+        self._last_headers: dict[str, str] = {}
         self._derived_images: dict[str, ImageHandle] = {}
 
         while True:
             if response is None:
                 resp = await self.upstream.request_json(cfg, self._payload(base_body, messages, tools))
                 self._last_status = resp.status_code
+                self._last_headers = resp.headers
                 response = resp.body
 
             if isinstance(response, dict) and response.get("error") is not None:
-                return ToolLoopResult(response, self._last_status, rounds, vision_tool_calls, buffered)
+                return ToolLoopResult(response, self._last_status, rounds, vision_tool_calls, buffered, upstream_headers=self._last_headers)
 
             message = self._extract_message(response)
             tool_calls = message.get("tool_calls") or []
             if not tool_calls:
-                return ToolLoopResult(response, self._status(), rounds, vision_tool_calls, buffered)
+                return ToolLoopResult(response, self._status(), rounds, vision_tool_calls, buffered, upstream_headers=self._last_headers)
 
             vision_tc = [t for t in tool_calls if _is_vision_tool((t.get("function") or {}).get("name"))]
             external_tc = [
@@ -284,7 +287,7 @@ class ToolLoop:
             if vision_tc and external_tc:
                 raise MixedToolCallsError()
             if external_tc:
-                return ToolLoopResult(response, self._status(), rounds, vision_tool_calls, buffered)
+                return ToolLoopResult(response, self._status(), rounds, vision_tool_calls, buffered, upstream_headers=self._last_headers)
 
             rounds += 1
             vision_tool_calls += len(vision_tc)
@@ -307,9 +310,11 @@ class ToolLoop:
                 final_tools = strip_vision_tools(tools)
                 resp = await self.upstream.request_json(cfg, self._payload(base_body, messages, final_tools))
                 self._last_status = resp.status_code
+                self._last_headers = resp.headers
                 response = resp.body
                 return ToolLoopResult(
-                    response, self._status(), rounds, vision_tool_calls, buffered, exceeded=True
+                    response, self._status(), rounds, vision_tool_calls, buffered, exceeded=True,
+                    upstream_headers=self._last_headers,
                 )
 
             messages.append(_deepcopy(message))

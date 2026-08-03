@@ -802,3 +802,64 @@ async def test_reasoning_effort_passed_to_upstream(tmp_path) -> None:
         resp = await client.post("/v1/chat/completions", headers=request_headers(), json=body)
     assert resp.status_code == 200
     assert captured["reasoning_effort"] == "high"
+
+
+async def test_request_and_response_headers_passthrough(tmp_path) -> None:
+    upstream = UpstreamMock()
+    captured = {}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        captured["ua"] = request.headers.get("user-agent")
+        captured["x_custom"] = request.headers.get("x-custom-trace")
+        captured["cookie"] = request.headers.get("cookie")
+        captured["x_forwarded_for"] = request.headers.get("x-forwarded-for")
+        return httpx.Response(
+            200,
+            headers={"X-Upstream-Custom": "abc", "Set-Cookie": "sid=1", "X-Request-Id": "up1"},
+            json={"id": "c", "object": "chat.completion", "created": 1, "model": "m", "choices": [{"index": 0, "message": {"role": "assistant", "content": "ok"}, "finish_reason": "stop"}]},
+        )
+
+    upstream.responder = handler
+    app, _ = make_app(tmp_path, upstream, VisionMock())
+    headers = request_headers(
+        extra={
+            "User-Agent": "my-agent/1.0",
+            "X-Custom-Trace": "trace-1",
+            "Cookie": "session=secret",
+            "X-Forwarded-For": "10.0.0.1",
+            "X-Vision-Model": "qwen",
+        }
+    )
+    async with client_for(app) as client:
+        resp = await client.post("/v1/chat/completions", headers=headers, json=chat_body(messages=[{"role": "user", "content": "hi"}]))
+    # request passthrough (minus settings/IP/protocol)
+    assert captured["ua"] == "my-agent/1.0"
+    assert captured["x_custom"] == "trace-1"
+    assert captured["cookie"] == "session=secret"
+    assert captured["x_forwarded_for"] is None
+    # response passthrough (minus hop-by-hop), middleware X-Request-ID wins
+    assert resp.headers.get("x-upstream-custom") == "abc"
+    assert resp.headers.get("set-cookie") == "sid=1"
+    assert resp.headers.get("x-request-id") != "up1"
+
+
+async def test_literal_passthrough_raw_body_bytes(tmp_path) -> None:
+    upstream = UpstreamMock()
+    captured = {}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        captured["content"] = request.content
+        return httpx.Response(200, json={"ok": True})
+
+    upstream.responder = handler
+    app, _ = make_app(tmp_path, upstream, VisionMock())
+    # deliberately weird whitespace/field order so re-serialization would differ
+    body = b'{"model": "m",  "messages":  [ {"role":"user","content":"hi"} ]}'
+    async with client_for(app) as client:
+        resp = await client.post(
+            "/v1/chat/completions",
+            headers=request_headers(),
+            content=body,
+        )
+    assert resp.status_code == 200
+    assert captured["content"] == body  # byte-for-byte transparent

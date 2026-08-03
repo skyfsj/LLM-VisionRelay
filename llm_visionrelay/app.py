@@ -164,6 +164,35 @@ def build_response_headers(
     return headers
 
 
+_RESPONSE_HOP_BY_HOP = frozenset(
+    {
+        "content-length",
+        "connection",
+        "transfer-encoding",
+        "upgrade",
+        "keep-alive",
+        "content-encoding",
+    }
+)
+
+
+def passthrough_response_headers(
+    upstream_headers: dict[str, str] | None, own_headers: dict[str, str]
+) -> dict[str, str]:
+    """Forward upstream response headers to the client (minus hop-by-hop),
+    with the middleware's own headers taking precedence."""
+    merged: dict[str, str] = {}
+    for name, value in (upstream_headers or {}).items():
+        ln = name.lower()
+        if ln in _RESPONSE_HOP_BY_HOP:
+            continue
+        if ln in ("server", "date"):
+            continue
+        merged[ln] = value
+    merged.update({k.lower(): v for k, v in own_headers.items()})
+    return merged
+
+
 def _messages_have_images(messages: list[dict[str, Any]]) -> bool:
     for message in messages:
         content = message.get("content")
@@ -180,6 +209,7 @@ async def _literal_passthrough(
     cfg: RequestConfig,
     body: dict[str, Any],
     protocol: str,
+    raw_bytes: bytes | None = None,
 ) -> Response:
     """Proxy a request verbatim when the client and upstream speak the same
     protocol and no vision transformation is needed."""
@@ -188,18 +218,22 @@ async def _literal_passthrough(
     headers = {"Content-Type": "application/json"}
     if cfg.authorization:
         headers["Authorization"] = cfg.authorization
-    content = json.dumps(body, ensure_ascii=False).encode()
+    if cfg.passthrough_headers:
+        headers.update({k: v for k, v in cfg.passthrough_headers.items() if k.lower() not in headers})
+    content = raw_bytes if raw_bytes is not None else json.dumps(body, ensure_ascii=False).encode()
     if not body.get("stream"):
         resp = await services.upstream.post_bytes(url, headers, content)
-        media_type = resp.headers.get("content-type", "application/json")
+        resp_headers = passthrough_response_headers(dict(resp.headers), {"X-Request-ID": request_id})
+        media_type = resp_headers.get("content-type", "application/json")
         return Response(
             content=resp.content,
             status_code=resp.status_code,
             media_type=media_type,
-            headers={"X-Request-ID": request_id},
+            headers=resp_headers,
         )
 
     upstream_resp = await services.upstream.stream_bytes(url, headers, content)
+    resp_headers = passthrough_response_headers(dict(upstream_resp.headers), {"X-Request-ID": request_id})
 
     async def gen() -> AsyncIterator[str]:
         async for line in upstream_resp.aiter_lines():
@@ -208,7 +242,7 @@ async def _literal_passthrough(
     return StreamingResponse(
         gen(),
         media_type="text/event-stream",
-        headers={"X-Request-ID": request_id},
+        headers=resp_headers,
     )
 
 
@@ -412,7 +446,8 @@ async def handle_protocol(request: Request, services: ProxyServices, protocol: s
         cfg.request_id = request_id
 
         try:
-            raw = await request.json()
+            raw_bytes = await request.body()
+            raw = json.loads(raw_bytes)
         except (json.JSONDecodeError, ValueError) as exc:
             raise InvalidRequestBody("request body is not valid JSON") from exc
         if not isinstance(raw, dict):
@@ -429,7 +464,9 @@ async def handle_protocol(request: Request, services: ProxyServices, protocol: s
         messages = normalized.messages
 
         if protocol == cfg.upstream_protocol and not _messages_have_images(messages):
-            passthrough_resp = await _literal_passthrough(request, services, cfg, body, protocol)
+            passthrough_resp = await _literal_passthrough(
+                request, services, cfg, body, protocol, raw_bytes=raw_bytes
+            )
             status_code = passthrough_resp.status_code
             return passthrough_resp
 
@@ -502,7 +539,8 @@ async def handle_protocol(request: Request, services: ProxyServices, protocol: s
             status_code = result.status_code
             rounds = result.internal_rounds
             vision_calls = result.vision_tool_calls
-            headers = build_response_headers(request_id, counter, handles)
+            own_headers = build_response_headers(request_id, counter, handles)
+            headers = passthrough_response_headers(result.upstream_headers, own_headers)
             payload = result.response
             if isinstance(payload, dict) and payload.get("error") is not None:
                 payload = render_error_payload(protocol, payload)
@@ -587,8 +625,10 @@ async def _handle_stream(
     acc = StreamAccumulator()
     raw_lines: list[str] = []
     chunks: list[dict[str, Any]] = []
+    upstream_headers: dict[str, str] = {}
     if cfg.upstream_protocol == PROTOCOL_CHAT:
         upstream_resp = await services.upstream.request_stream(cfg, payload)
+        upstream_headers = dict(upstream_resp.headers)
         try:
             async for line in upstream_resp.aiter_lines():
                 raw_lines.append(line)
@@ -608,6 +648,7 @@ async def _handle_stream(
         async for chunk in adapter.stream_chunks(cfg, payload):
             chunks.append(chunk)
             acc.add(chunk)
+        upstream_headers = getattr(adapter, "last_stream_headers", {}) or {}
 
     if not acc.has_vision_tool_calls():
         if protocol == PROTOCOL_CHAT and cfg.upstream_protocol == PROTOCOL_CHAT:
@@ -616,7 +657,8 @@ async def _handle_stream(
                 for line in raw_lines:
                     yield line + "\n"
 
-            headers = build_response_headers(request_id, counter, handles)
+            own_headers = build_response_headers(request_id, counter, handles)
+            headers = passthrough_response_headers(upstream_headers, own_headers)
             return StreamingResponse(replay(), media_type="text/event-stream", headers=headers)
 
         translated = translate_stream_lines(protocol, chunks)
@@ -625,7 +667,8 @@ async def _handle_stream(
             for line in translated:
                 yield line
 
-        headers = build_response_headers(request_id, counter, handles)
+        own_headers = build_response_headers(request_id, counter, handles)
+        headers = passthrough_response_headers(upstream_headers, own_headers)
         return StreamingResponse(translated_sse(), media_type="text/event-stream", headers=headers)
 
     initial_response = {
@@ -647,7 +690,8 @@ async def _handle_stream(
         initial_response=initial_response,
     )
     lines = render_sse_lines(protocol, result.response)
-    headers = build_response_headers(request_id, counter, handles, buffered=True)
+    own_headers = build_response_headers(request_id, counter, handles, buffered=True)
+    headers = passthrough_response_headers(result.upstream_headers, own_headers)
 
     async def sse() -> AsyncIterator[str]:
         for line in lines:
