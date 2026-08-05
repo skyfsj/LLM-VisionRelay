@@ -35,6 +35,7 @@ from llm_visionrelay.message_transform import (
     validate_image_count,
 )
 from llm_visionrelay.models import ChatCompletionRequest
+from llm_visionrelay.progress import ProgressTracker
 from llm_visionrelay.protocols import (
     PROTOCOL_ANTHROPIC,
     PROTOCOL_CHAT,
@@ -84,6 +85,7 @@ class ProxyServices:
         self.vision_service = VisionService(config, self.db, self.image_service, self.singleflight)
         self.upstream = UpstreamClient(config)
         self.upstream_models = UpstreamModelRegistry()
+        self.progress: dict[str, ProgressTracker] = {}
 
     async def enter(self) -> None:
         setup_logging(self.config.log_level)
@@ -395,6 +397,21 @@ def create_app(config: Config | None = None) -> FastAPI:
         await _guard_management(request, config)
         return await services.image_service.stats()
 
+    @app.get("/internal/progress")
+    async def progress_list(request: Request) -> dict[str, Any]:
+        await _guard_management(request, config)
+        return {
+            "active": [t.snapshot() for t in services.progress.values()],
+        }
+
+    @app.get("/internal/progress/{request_id}")
+    async def progress(request: Request, request_id: str) -> Response:
+        await _guard_management(request, config)
+        tracker = services.progress.get(request_id)
+        if tracker is None:
+            return JSONResponse({"error": "not_found", "request_id": request_id}, status_code=404)
+        return JSONResponse(tracker.snapshot())
+
     @app.delete("/internal/cache")
     async def clear_cache(
         request: Request,
@@ -473,6 +490,7 @@ async def handle_protocol(request: Request, services: ProxyServices, protocol: s
     rounds = 0
     vision_calls = 0
     cfg: RequestConfig | None = None
+    tracker: ProgressTracker | None = None
     try:
         cfg = parse_request_headers(request.headers, config)
         cfg.request_id = request_id
@@ -531,6 +549,23 @@ async def handle_protocol(request: Request, services: ProxyServices, protocol: s
             if (cfg.auto_analyze or cfg.tools_enabled) and vision_cfg is None:
                 raise MissingVisionConfig()
             if cfg.auto_analyze and vision_cfg is not None:
+                tracker = ProgressTracker(request_id=request_id, total_images=len(handles))
+                services.progress[request_id] = tracker
+                async def _on_image_done(done: int, total: int, elapsed_ms: float) -> None:
+                    tracker.image_done(elapsed_ms)
+                    snap = tracker.snapshot()
+                    eta_s = snap["eta_ms"] / 1000 if snap["eta_ms"] is not None else None
+                    _log.info(
+                        "vision progress request_id=%s images=%d/%d elapsed_ms=%.0f "
+                        "avg_ms=%.0f eta_s=%s",
+                        request_id,
+                        done,
+                        total,
+                        elapsed_ms,
+                        snap["avg_ms_per_image"] or 0,
+                        f"{eta_s:.1f}" if eta_s is not None else "-",
+                    )
+
                 summaries = await services.vision_service.ensure_summaries_shielded(
                     cfg.tenant_id,
                     handles,
@@ -538,7 +573,9 @@ async def handle_protocol(request: Request, services: ProxyServices, protocol: s
                     counter,
                     force_refresh=cfg.force_refresh,
                     ttl=cfg.cache_ttl,
+                    on_progress=_on_image_done,
                 )
+                tracker.finish()
             else:
                 summaries = [None] * len(handles)
             new_messages = rebuild_messages(messages, collected, handles, summaries, cfg.auto_analyze)
@@ -616,6 +653,12 @@ async def handle_protocol(request: Request, services: ProxyServices, protocol: s
             headers={"X-Request-ID": request_id},
         )
     finally:
+        if tracker is not None:
+            if status_code >= 400:
+                tracker.finish(phase="error")
+            else:
+                tracker.finish()
+            services.progress.pop(request_id, None)
         duration_ms = (time.monotonic() - start) * 1000
         tenant_short = cfg.tenant_id[:8] if cfg else "-"
         _log.info(

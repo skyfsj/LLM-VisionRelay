@@ -314,7 +314,12 @@ class VisionService:
         task.add_done_callback(self._background_tasks.discard)
         return task
 
-    async def ensure_summaries_shielded(self, *args: Any, **kwargs: Any) -> list[VisionResult | None]:
+    async def ensure_summaries_shielded(
+        self,
+        *args: Any,
+        on_progress: Callable[[int, int, float], Awaitable[None]] | None = None,
+        **kwargs: Any,
+    ) -> list[VisionResult | None]:
         """Run :meth:`ensure_summaries` in a shielded background task.
 
         If the client disconnects mid-analysis, the remaining images still get
@@ -322,7 +327,7 @@ class VisionService:
         re-reads the images. The handler only awaits the result while the client
         is still connected.
         """
-        task = self._track(self.ensure_summaries(*args, **kwargs))
+        task = self._track(self.ensure_summaries(*args, on_progress=on_progress, **kwargs))
         return await asyncio.shield(task)
 
     # ------------------------------------------------------------------ summarize batch
@@ -334,9 +339,12 @@ class VisionService:
         counter: CacheCounter,
         force_refresh: bool = False,
         ttl: float | None = None,
+        on_progress: Callable[[int, int, float], Awaitable[None]] | None = None,
     ) -> list[VisionResult | None]:
         results: list[VisionResult | None] = []
-        for handle in handles:
+        total = len(handles)
+        for index, handle in enumerate(handles, start=1):
+            started = time.monotonic()
             results.append(
                 await self.get_summary(
                     tenant,
@@ -347,6 +355,8 @@ class VisionService:
                     ttl=ttl,
                 )
             )
+            if on_progress is not None:
+                await on_progress(index, total, (time.monotonic() - started) * 1000)
         return results
 
     # ------------------------------------------------------------------ summary

@@ -253,11 +253,18 @@ By default only reachable from loopback; with `--management-token` set, requests
 ```bash
 curl http://127.0.0.1:8080/healthz
 curl http://127.0.0.1:8080/internal/cache/stats
+curl http://127.0.0.1:8080/internal/progress/<request_id>
 curl -X DELETE 'http://127.0.0.1:8080/internal/cache?all=true'
 curl -X DELETE 'http://127.0.0.1:8080/internal/cache?namespace=client-42'
 curl -X DELETE 'http://127.0.0.1:8080/internal/cache?image_ref=img_sha256_<64hex>'
 curl -X DELETE 'http://127.0.0.1:8080/internal/cache?expired=true'
 ```
+
+While a request is analyzing images, `GET /internal/progress/<request_id>` reports live
+progress: `phase`, `images_done` / `images_total`, elapsed time, average time per image and
+estimated remaining time (`eta_ms`). The `request_id` is echoed in the `X-Request-ID`
+response header. Per-image progress is also written to the logs
+(`vision progress request_id=... images=N/M elapsed_ms=... eta_s=...`).
 
 ## Architecture
 
