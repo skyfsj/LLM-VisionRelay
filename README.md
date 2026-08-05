@@ -135,7 +135,7 @@ requests hit the cache (`X-Vision-Cache: HIT`).
 | `X-Upstream-Vision` | `auto` (default) / `true` / `false` — pass images through when the upstream is vision-capable |
 | `X-Vision-Base-URL` | vision model base URL |
 | `X-Vision-Model` | vision model name |
-| `X-Vision-Authorization` | vision model key, sent only to the vision endpoint |
+| `X-Vision-Authorization` | vision model key, sent only to the vision endpoint (bare keys like `sk-...` are auto-prefixed with `Bearer ` for standard APIs) |
 | `X-Vision-Header-*` | extra headers forwarded to the vision endpoint |
 | `X-Vision-Auto-Analyze` | auto-generate a summary for each image (default `true`) |
 | `X-Vision-Tools` | inject `__vision_` tools (default `true`) |

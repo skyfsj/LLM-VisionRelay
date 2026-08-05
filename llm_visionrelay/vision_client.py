@@ -34,6 +34,21 @@ VISION_SCHEMA_VERSION = "1"
 VISION_TOOL_VERSION = "1"
 VISION_TOOL_PREFIX = "__vision_"
 
+
+def normalize_authorization(value: str) -> str:
+    """Return an ``Authorization`` header value that standard HTTP APIs accept.
+
+    A bare API key (e.g. ``sk-...``, the format public clouds expect in
+    ``X-Vision-Authorization``) is prefixed with ``Bearer``. Scheme-qualified
+    values (``Bearer ...``, ``Basic ...``, ``Token ...``) are returned unchanged.
+    """
+    stripped = value.strip()
+    if not stripped:
+        return ""
+    if " " in stripped or ":" in stripped:
+        return stripped
+    return f"Bearer {stripped}"
+
 SYSTEM_PROMPT = (
     "你是一个具有强大视觉理解能力的模型。你正在替一个只能看文字的模型看图，"
     "你的任务是用你原生看到图片的方式，尽可能完整、准确地把图“翻译”给那个纯文本模型。\n"
@@ -657,7 +672,7 @@ class VisionService:
         url = vision.base_url.rstrip("/") + "/chat/completions"
         headers = {"Content-Type": "application/json", "Accept": "application/json"}
         if vision.authorization:
-            headers["Authorization"] = vision.authorization
+            headers["Authorization"] = normalize_authorization(vision.authorization)
         headers.update(vision.headers)
         payload: dict[str, Any] = {"model": vision.model, "temperature": 0, "messages": messages}
         if vision.params:
